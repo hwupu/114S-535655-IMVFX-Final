@@ -16,13 +16,24 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 sys.path.append(str(Path(__file__).parent.parent / "shared"))
-from device import get_device
+from device import get_device, flush_memory
 
 app = FastAPI(title="Grounded-SAM Service")
 
 _jobs: dict[str, dict] = {}
 _grounding_model = None
 _sam_predictor = None
+
+
+def _unload() -> None:
+    global _grounding_model, _sam_predictor
+    if _grounding_model is not None:
+        del _grounding_model
+        _grounding_model = None
+    if _sam_predictor is not None:
+        del _sam_predictor
+        _sam_predictor = None
+    flush_memory()
 
 
 def _load_models():
@@ -125,10 +136,18 @@ def _run_job(job_id: str, req: InferRequest):
     except Exception as exc:
         job["status"] = "error"
         job["detail"] = str(exc)
+    finally:
+        _unload()
 
 
 @app.get("/health")
 def health():
+    return {"ok": True}
+
+
+@app.post("/release")
+def release():
+    _unload()
     return {"ok": True}
 
 

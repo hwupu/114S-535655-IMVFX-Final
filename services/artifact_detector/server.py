@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 sys.path.append(str(Path(__file__).parent.parent / "shared"))
-from device import get_device
+from device import get_device, flush_memory
 
 app = FastAPI(title="Artifact Detector Service")
 
@@ -25,6 +25,17 @@ SYSTEM_PROMPT = (
     "If you find artifacts, list each one concisely (e.g. 'six fingers on right hand', "
     "'deformed left eye'). If the image looks clean, reply with exactly: NO_ARTIFACTS"
 )
+
+
+def _unload() -> None:
+    global _model, _processor
+    if _model is not None:
+        del _model
+        _model = None
+    if _processor is not None:
+        del _processor
+        _processor = None
+    flush_memory()
 
 
 def _load_model():
@@ -107,10 +118,18 @@ def _run_job(job_id: str, req: InferRequest):
     except Exception as exc:
         job["status"] = "error"
         job["detail"] = str(exc)
+    finally:
+        _unload()
 
 
 @app.get("/health")
 def health():
+    return {"ok": True}
+
+
+@app.post("/release")
+def release():
+    _unload()
     return {"ok": True}
 
 
