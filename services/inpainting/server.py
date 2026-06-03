@@ -24,7 +24,7 @@ def _load_pipeline():
     import torch
 
     device = get_device()
-    dtype = torch.float16 if device in ("cuda", "mps") else torch.float32
+    dtype = torch.float16 if device == "cuda" else torch.float32
     _pipeline = StableDiffusionInpaintPipeline.from_pretrained(
         "stabilityai/stable-diffusion-2-inpainting",
         torch_dtype=dtype,

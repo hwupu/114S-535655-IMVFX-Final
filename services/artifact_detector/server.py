@@ -35,7 +35,7 @@ def _load_model():
     import torch
 
     device = get_device()
-    dtype = torch.float16 if device in ("cuda", "mps") else torch.float32
+    dtype = torch.float16 if device == "cuda" else torch.float32
     _model = Qwen2VLForConditionalGeneration.from_pretrained(
         "Qwen/Qwen2-VL-2B-Instruct",
         torch_dtype=dtype,
