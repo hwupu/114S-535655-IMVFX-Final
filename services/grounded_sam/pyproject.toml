@@ -1,0 +1,15 @@
+[project]
+name = "grounded-sam-service"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.29",
+    "torch>=2.2",
+    "torchvision>=0.17",
+    "pillow>=10.0",
+    "supervision>=0.19",
+    "numpy>=1.26",
+    "opencv-python-headless>=4.9",
+    # sam2 and groundingdino installed from source — see README
+]

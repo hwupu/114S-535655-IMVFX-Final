@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Next.js
+frontend/.next/
+frontend/out/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+.uv/
+
+# uv
+uv.lock
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Workspace (temp session files)
+workspace/*/
+
+# Model checkpoints (large files)
+services/*/checkpoints/
+services/*/weights/
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.bin
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
