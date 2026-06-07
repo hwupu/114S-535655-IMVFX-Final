@@ -16,6 +16,7 @@ start_service instructpix2pix 8001
 start_service artifact_detector 8002
 start_service grounded_sam 8003
 start_service inpainting 8004
+start_service fakeVLM 8005
 
 echo ""
 echo "All services started. Logs in ./logs/"

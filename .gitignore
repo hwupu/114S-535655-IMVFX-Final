@@ -30,6 +30,9 @@ uv.lock
 # Workspace (temp session files)
 workspace/*/
 
+# Vendored external source (cloned by setup.py, not owned code)
+services/grounded_sam/vendor/
+
 # Model checkpoints (large files)
 services/*/checkpoints/
 services/*/weights/

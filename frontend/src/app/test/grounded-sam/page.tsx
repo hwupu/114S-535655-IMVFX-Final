@@ -1,0 +1,174 @@
+"use client";
+
+import { useState, useRef } from "react";
+import TestShell from "@/components/TestShell";
+import Dropzone from "@/components/Dropzone";
+
+type Status = "idle" | "uploading" | "running" | "done" | "error";
+
+export default function GroundedSAMTestPage() {
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [descriptions, setDescriptions] = useState("six fingers on right hand\ndeformed face");
+  const [status, setStatus] = useState<Status>("idle");
+  const [progress, setProgress] = useState(0);
+  const [maskUrl, setMaskUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const pollerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const stopPoller = () => {
+    if (pollerRef.current) { clearInterval(pollerRef.current); pollerRef.current = null; }
+  };
+
+  const handleFile = async (file: File) => {
+    setImageUrl(URL.createObjectURL(file));
+    setStatus("uploading");
+    setMaskUrl(null);
+    setError(null);
+    const form = new FormData();
+    form.append("image", file);
+    const res = await fetch("/api/upload", { method: "POST", body: form });
+    const { sessionId: sid } = await res.json();
+    setSessionId(sid);
+    setStatus("idle");
+  };
+
+  const handleRun = async () => {
+    if (!sessionId) return;
+    const artifactDescriptions = descriptions
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (artifactDescriptions.length === 0) return;
+
+    setStatus("running");
+    setProgress(0);
+    setMaskUrl(null);
+    setError(null);
+
+    const invokeRes = await fetch("/api/test/invoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ service: "grounded_sam", sessionId, artifactDescriptions }),
+    });
+    if (!invokeRes.ok) {
+      const { error: e } = await invokeRes.json();
+      setError(e);
+      setStatus("error");
+      return;
+    }
+    const { jobId, port } = await invokeRes.json();
+
+    stopPoller();
+    pollerRef.current = setInterval(async () => {
+      const r = await fetch(`/api/test/status?port=${port}&jobId=${jobId}&sessionId=${sessionId}`);
+      const data = await r.json();
+      setProgress(data.progress ?? 0);
+      if (data.status === "done") {
+        stopPoller();
+        setMaskUrl(data.resultImageUrl ?? null);
+        setStatus("done");
+      }
+      if (data.status === "error") {
+        stopPoller();
+        setError(data.detail ?? "Unknown error");
+        setStatus("error");
+      }
+    }, 600);
+  };
+
+  const reset = () => {
+    stopPoller();
+    setImageUrl(null);
+    setSessionId(null);
+    setMaskUrl(null);
+    setError(null);
+    setProgress(0);
+    setStatus("idle");
+  };
+
+  const busy = status === "uploading" || status === "running";
+  const descList = descriptions.split("\n").map((s) => s.trim()).filter(Boolean);
+
+  return (
+    <TestShell
+      title="Grounded-SAM"
+      port={8003}
+      description="Text-guided segmentation: provide artifact descriptions to generate a mask"
+    >
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Inputs */}
+        <div className="space-y-4">
+          <Dropzone onFile={handleFile} disabled={busy} currentImageUrl={imageUrl} />
+          <div>
+            <label className="mb-1.5 block text-xs text-zinc-400">
+              Artifact descriptions{" "}
+              <span className="text-zinc-600">(one per line)</span>
+            </label>
+            <textarea
+              value={descriptions}
+              onChange={(e) => setDescriptions(e.target.value)}
+              disabled={busy}
+              rows={4}
+              className="w-full resize-none rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-emerald-500 focus:outline-none disabled:opacity-50"
+              placeholder="six fingers on right hand&#10;deformed left eye"
+            />
+            <p className="mt-1 text-xs text-zinc-600">
+              {descList.length} description{descList.length !== 1 ? "s" : ""}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleRun}
+              disabled={!sessionId || busy || descList.length === 0}
+              className="flex-1 rounded-lg bg-emerald-600 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {status === "running" ? `Segmenting… ${progress}%` : "Generate Mask"}
+            </button>
+            {(maskUrl || error) && (
+              <button
+                onClick={reset}
+                className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-400 hover:border-zinc-500 hover:text-zinc-200"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+          {status === "running" && (
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-800">
+              <div
+                className="h-full rounded-full bg-emerald-500 transition-all"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          )}
+          {error && (
+            <p className="rounded-lg border border-red-800 bg-red-950/50 px-3 py-2 text-xs text-red-400">
+              {error}
+            </p>
+          )}
+        </div>
+
+        {/* Result */}
+        <div className="flex min-h-48 items-center justify-center rounded-xl border border-zinc-800 bg-zinc-900">
+          {maskUrl ? (
+            <div className="w-full space-y-2 p-2">
+              <p className="px-2 text-xs text-zinc-500">Segmentation mask</p>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={maskUrl}
+                alt="Mask"
+                className="max-h-80 w-full rounded-lg object-contain"
+                style={{ filter: "invert(1) brightness(1.5) sepia(1) hue-rotate(80deg)" }}
+              />
+            </div>
+          ) : (
+            <p className="text-sm text-zinc-600">
+              {status === "running" ? "Generating mask…" : "Mask will appear here"}
+            </p>
+          )}
+        </div>
+      </div>
+    </TestShell>
+  );
+}

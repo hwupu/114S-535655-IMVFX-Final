@@ -70,6 +70,8 @@ This stage is intentionally a *global* transformation. Because diffusion-based e
 - `image_guidance_scale=1.5` — how much the output follows the original image structure
 - `guidance_scale=7.5` — how strictly the edit instruction is followed
 
+The input image is resized to 512×512 before inference (the model's native resolution) and scaled back to the original size afterward to avoid OOM on high-resolution inputs.
+
 ---
 
 ### Stage 2 — Artifact Detection (Qwen2-VL-2B-Instruct)
@@ -143,7 +145,7 @@ The inpainting model receives:
 
 SD2 Inpainting fills the masked region by sampling from the diffusion model conditioned on both the surrounding image context and the text prompt. The text guidance is critical here: because the prompt explicitly describes what is wrong and asks for a natural repair, the model is steered away from reproducing the same artifact in the fill.
 
-The image is resized to 512×512 for inference (the model's native resolution) and scaled back to the original size afterward.
+The image and mask are resized to 512×512 for inference (the model's native resolution) and scaled back to the original size afterward.
 
 **Why SD2 Inpainting over RePaint or PowerPaint?**
 
@@ -157,9 +159,20 @@ SD2 Inpainting was selected as the best practical starting point: the text guida
 
 ---
 
+### Experimental Service — FakeVLM (Port 8005)
+
+**Model:** `lingcco/fakeVLM` — LLaVA-based real/fake image classifier  
+**Port:** 8005 · Python 3.11
+
+FakeVLM is an experimental addition that classifies whether an image appears to be real or AI-generated, returning a natural-language verdict. It is **not** part of the main pipeline; it runs as a standalone service and can be tested independently via the test interface at `/test/fakevlm`.
+
+The model uses 4-bit NF4 quantization (BitsAndBytes) on CUDA for memory efficiency. On MPS or CPU, quantization is disabled and the model runs in `float32`.
+
+---
+
 ## Hardware Detection
 
-All four Python services use a shared utility (`services/shared/device.py`) that selects the best available compute device at startup:
+All services use a shared utility (`services/shared/device.py`) that selects the best available compute device at startup:
 
 ```python
 def get_device() -> str:
@@ -170,7 +183,23 @@ def get_device() -> str:
     return "cpu"
 ```
 
-This allows the same code to run on an Apple Silicon development machine (MPS) and a CUDA production machine without modification. Models are loaded in `float16` on MPS and CUDA, and `float32` on CPU.
+**dtype selection:**
+
+| Device | dtype |
+|---|---|
+| CUDA | `float16` (half precision, reduced VRAM) |
+| MPS | `float32` (MPS float16 triggers an assertion in `MPSNDArrayMatrixMultiplication`) |
+| CPU | `float32` |
+
+---
+
+## VRAM Management
+
+If all models were loaded simultaneously, combined VRAM use would exceed 20 GB. Since the pipeline executes strictly sequentially (Stage 1 → 2 → 3 → 4 never overlap), each service **unloads its model immediately after each job completes** via a `try/finally` block. By the time the Next.js orchestrator polls `"done"` and issues the next `POST /infer`, the previous model has already been released.
+
+**Peak VRAM: ~6 GB** (the largest single model), down from ~20 GB cumulative.
+
+Each service also exposes a `POST /release` endpoint for explicit orchestrator-triggered unloads.
 
 ---
 
@@ -178,7 +207,7 @@ This allows the same code to run on an Apple Silicon development machine (MPS) a
 
 ### Microservice design
 
-Each model runs as an independent FastAPI server in its own `uv`-managed Python environment. This solves a real dependency conflict problem: InstructPix2Pix and SD Inpainting share `diffusers` but at potentially different version requirements; Grounded-SAM 2 requires compiled C++ extensions from source; Qwen2-VL requires a newer Python (3.11) for some dependencies.
+Each model runs as an independent FastAPI server in its own `uv`-managed Python environment. This solves a real dependency conflict problem: InstructPix2Pix and SD Inpainting share `diffusers` but at potentially different version requirements; Grounded-SAM 2 requires compiled C++ extensions from source; Qwen2-VL and FakeVLM require Python 3.11 and specific quantization libraries.
 
 Every service exposes the same REST API shape:
 
@@ -187,9 +216,10 @@ POST   /infer          → { job_id }
 GET    /jobs/{job_id}  → { status, progress, result_path?, result?, detail? }
 DELETE /jobs/{job_id}  → 204  (abort)
 GET    /health         → 200
+POST   /release        → 200  (unload model from VRAM)
 ```
 
-Jobs run in background threads so the FastAPI server stays responsive for status polling. This is sufficient for a single-user local application; a production system would use a proper task queue (Celery, ARQ).
+Jobs run in background threads so the FastAPI server stays responsive for status polling.
 
 ### Port assignments
 
@@ -199,6 +229,7 @@ Jobs run in background threads so the FastAPI server stays responsive for status
 | Artifact Detector | 8002 | Qwen/Qwen2-VL-2B-Instruct |
 | Grounded-SAM | 8003 | GroundingDINO + SAM 2 |
 | SD Inpainting | 8004 | stabilityai/stable-diffusion-2-inpainting |
+| FakeVLM *(experimental)* | 8005 | lingcco/fakeVLM |
 | Next.js frontend | 3000 | — |
 
 ### Next.js frontend
@@ -210,6 +241,8 @@ The frontend is a single-page React app (Next.js 16, App Router, TypeScript, Tai
 - **`/api/pipeline/abort`** — sets an in-memory abort flag for the session and calls `DELETE /jobs/{id}` on the currently active service
 - **`/api/images/{sessionId}/{filename}`** — serves workspace images to the browser
 - **`/api/upload/mask`** — saves the user-edited mask blob back to the workspace before Stage 4
+- **`/api/test/invoke`** — thin proxy used by test pages: resolves sessionIds to absolute paths and forwards to the target service's `/infer`
+- **`/api/test/status`** — proxies job status polling and converts `result_path` to a browser-accessible image URL
 
 Progress events are streamed as Server-Sent Events (SSE) over the HTTP response body. `EventSource` is not used because it only supports `GET`; instead, the browser reads the response as a `ReadableStream` and parses `data: {...}\n\n` frames manually.
 
@@ -240,12 +273,12 @@ The workspace directory is `.gitignore`d. Session files persist across aborts so
 ├── workspace/                          ← runtime session files (gitignored)
 │
 ├── scripts/
-│   ├── start_services.sh               ← start all 4 FastAPI services
+│   ├── start_services.sh               ← start all 5 FastAPI services
 │   └── stop_services.sh                ← stop by PID
 │
 ├── services/
 │   ├── shared/
-│   │   └── device.py                   ← MPS/CUDA/CPU auto-detect
+│   │   └── device.py                   ← MPS/CUDA/CPU auto-detect + flush_memory()
 │   │
 │   ├── instructpix2pix/
 │   │   ├── .python-version             ← 3.10
@@ -266,10 +299,17 @@ The workspace directory is `.gitignore`d. Session files persist across aborts so
 │   │   ├── setup.py                    ← one-time: install from source + download checkpoints
 │   │   └── start.sh
 │   │
-│   └── inpainting/
-│       ├── .python-version             ← 3.10
+│   ├── inpainting/
+│   │   ├── .python-version             ← 3.10
+│   │   ├── pyproject.toml
+│   │   ├── server.py                   ← FastAPI, port 8004
+│   │   └── start.sh
+│   │
+│   └── fakeVLM/                        ← experimental LLaVA classifier
+│       ├── .python-version             ← 3.11
 │       ├── pyproject.toml
-│       ├── server.py                   ← FastAPI, port 8004
+│       ├── server.py                   ← FastAPI, port 8005
+│       ├── testVLM.py                  ← standalone CLI test script
 │       └── start.sh
 │
 └── frontend/                           ← Next.js 16, TypeScript, Tailwind CSS
@@ -278,18 +318,28 @@ The workspace directory is `.gitignore`d. Session files persist across aborts so
     │   ├── app/
     │   │   ├── page.tsx                ← main UI, pipeline state machine
     │   │   ├── layout.tsx
+    │   │   ├── test/
+    │   │   │   ├── page.tsx            ← service test dashboard
+    │   │   │   ├── instructpix2pix/page.tsx
+    │   │   │   ├── fakevlm/page.tsx
+    │   │   │   ├── artifact-detector/page.tsx
+    │   │   │   ├── grounded-sam/page.tsx
+    │   │   │   └── inpainting/page.tsx
     │   │   └── api/
     │   │       ├── upload/route.ts
     │   │       ├── upload/mask/route.ts
     │   │       ├── pipeline/start/route.ts   ← SSE orchestrator
     │   │       ├── pipeline/abort/route.ts
-    │   │       └── images/[sessionId]/[filename]/route.ts
+    │   │       ├── images/[sessionId]/[filename]/route.ts
+    │   │       ├── test/invoke/route.ts      ← test-page job submission proxy
+    │   │       └── test/status/route.ts      ← test-page job polling proxy
     │   ├── components/
     │   │   ├── Dropzone.tsx
     │   │   ├── PromptPanel.tsx
     │   │   ├── PipelineStatus.tsx
     │   │   ├── MaskCanvas.tsx          ← mask overlay + circular brush
-    │   │   └── ResultPanel.tsx         ← three-panel comparison
+    │   │   ├── ResultPanel.tsx         ← three-panel comparison
+    │   │   └── TestShell.tsx           ← shared header for test pages
     │   └── lib/
     │       ├── types.ts
     │       ├── paths.ts                ← workspace path resolution
@@ -306,8 +356,9 @@ The workspace directory is `.gitignore`d. Session files persist across aborts so
 
 - [uv](https://docs.astral.sh/uv/) — Python package and environment manager
 - Node.js 20+ and npm
-- Python 3.10 and 3.11 available (uv will manage them)
-- Sufficient disk space for model weights (~20 GB total)
+- Python 3.10 and 3.11 (uv will download and manage them automatically)
+- ~25 GB free disk space for model weights and Python environments
+- NVIDIA GPU (recommended) or Apple Silicon Mac; CPU-only is supported but slow
 
 ### 1. Install Node dependencies
 
@@ -318,17 +369,21 @@ npm install
 
 ### 2. Install Python dependencies for each service
 
-`uv` reads `.python-version` and `pyproject.toml` and creates an isolated virtual environment per service.
+`uv sync` reads `.python-version` and `pyproject.toml` and creates an isolated virtual environment. Run it once per service directory.
+
+**On Linux / Windows (NVIDIA GPU):** uv pulls the CUDA 12.1 PyTorch wheels automatically — no manual torch install needed.  
+**On macOS (Apple Silicon):** uv falls back to the standard PyPI torch with MPS support.
 
 ```bash
-cd services/instructpix2pix  && uv sync
-cd services/artifact_detector && uv sync
-cd services/inpainting        && uv sync
+cd services/instructpix2pix  && uv sync && cd ../..
+cd services/artifact_detector && uv sync && cd ../..
+cd services/inpainting        && uv sync && cd ../..
+cd services/fakeVLM           && uv sync && cd ../..
 ```
 
 ### 3. Set up Grounded-SAM (one-time, requires internet)
 
-This script clones GroundingDINO and SAM 2 from GitHub, installs them into the service environment, and downloads the model checkpoints (~2 GB):
+This script clones GroundingDINO and SAM 2 from GitHub, installs them into the service environment via `uv pip install -e`, and downloads the model checkpoints (~2 GB):
 
 ```bash
 cd services/grounded_sam
@@ -336,17 +391,27 @@ uv sync
 uv run python setup.py
 ```
 
+> **macOS / Linux prerequisite:** `Xcode Command Line Tools` (macOS) or `build-essential` + `python3-dev` (Linux) must be installed for the C++ extension compilation.
+
 ### 4. Model weights (auto-downloaded on first run)
 
 The remaining models are downloaded automatically from HuggingFace the first time each service handles a request:
 
-| Service | Model | Size |
+| Service | Model | Approx. Size |
 |---|---|---|
 | InstructPix2Pix | timbrooks/instruct-pix2pix | ~8 GB |
 | Artifact Detector | Qwen/Qwen2-VL-2B-Instruct | ~5 GB |
 | SD Inpainting | stabilityai/stable-diffusion-2-inpainting | ~5 GB |
+| FakeVLM | lingcco/fakeVLM | ~7 GB |
 
-To pre-download without running the pipeline, use `huggingface-cli download <model-id>`.
+Weights are cached in `~/.cache/huggingface/hub/`. To pre-download without running the pipeline:
+
+```bash
+huggingface-cli download timbrooks/instruct-pix2pix
+huggingface-cli download Qwen/Qwen2-VL-2B-Instruct
+huggingface-cli download stabilityai/stable-diffusion-2-inpainting
+huggingface-cli download lingcco/fakeVLM
+```
 
 ---
 
@@ -358,7 +423,7 @@ To pre-download without running the pipeline, use `huggingface-cli download <mod
 bash scripts/start_services.sh
 ```
 
-This launches all four FastAPI servers as background processes. Logs are written to `logs/`. To stop them:
+This launches all five FastAPI servers as background processes. Logs are written to `logs/{service}.log` and PIDs to `logs/{service}.pid`. To stop them:
 
 ```bash
 bash scripts/stop_services.sh
@@ -367,7 +432,8 @@ bash scripts/stop_services.sh
 You can also start services individually for development:
 
 ```bash
-cd services/instructpix2pix && bash start.sh
+bash services/instructpix2pix/start.sh
+# or any other service directory
 ```
 
 ### Start the frontend
@@ -386,11 +452,14 @@ curl http://localhost:8001/health   # InstructPix2Pix
 curl http://localhost:8002/health   # Artifact Detector
 curl http://localhost:8003/health   # Grounded-SAM
 curl http://localhost:8004/health   # SD Inpainting
+curl http://localhost:8005/health   # FakeVLM (experimental)
 ```
 
 ---
 
 ## Usage
+
+### Main pipeline
 
 1. **Drop an image** onto the upload area, or click to browse.
 2. **Choose or type an instruction** — e.g., "make it look like a painting".
@@ -403,6 +472,20 @@ curl http://localhost:8004/health   # SD Inpainting
 6. The **Results** panel shows the original image, the mask, and the repaired result side by side.
 
 **Abort at any time** using the Abort button. The pipeline rewinds to the last completed stage; no work is lost. Use **Reset** to clear everything and start over.
+
+### Service test pages
+
+Each model can be tested independently at [http://localhost:3000/test](http://localhost:3000/test). A test page is available for every service:
+
+| URL | What to test |
+|---|---|
+| `/test/instructpix2pix` | Upload image + type prompt → see edited image |
+| `/test/fakevlm` | Upload image → get real/fake verdict text |
+| `/test/artifact-detector` | Upload image → see detected artifact list |
+| `/test/grounded-sam` | Upload image + type artifact descriptions → see segmentation mask |
+| `/test/inpainting` | Upload image + mask + type prompt → see inpainted result |
+
+These pages are useful for verifying that each service is working correctly before running the full pipeline.
 
 ---
 
@@ -420,7 +503,7 @@ Content-Type: application/json
 **InstructPix2Pix (8001)**
 ```json
 {
-  "image_path": "/abs/path/to/workspace/{sessionId}/original.png",
+  "image_path": "/abs/path/workspace/{sessionId}/original.png",
   "prompt": "make it look like a painting",
   "session_id": "{sessionId}"
 }
@@ -429,11 +512,11 @@ Content-Type: application/json
 **Artifact Detector (8002)**
 ```json
 {
-  "image_path": "/abs/path/to/workspace/{sessionId}/stage1_output.png",
+  "image_path": "/abs/path/workspace/{sessionId}/stage1_output.png",
   "session_id": "{sessionId}"
 }
 ```
-Response result:
+Response `result`:
 ```json
 { "has_artifacts": true, "artifacts": ["six fingers on right hand", "deformed left eye"] }
 ```
@@ -451,13 +534,23 @@ Response result:
 ```json
 {
   "image_path": "...",
-  "mask_path": "/abs/path/to/workspace/{sessionId}/stage3_mask.png",
+  "mask_path": "/abs/path/workspace/{sessionId}/stage3_mask.png",
   "prompt": "Naturally repair the following defects: six fingers on right hand",
   "session_id": "{sessionId}"
 }
 ```
 
-All return:
+**FakeVLM (8005)**
+```json
+{
+  "image_path": "...",
+  "prompt": "<image>Does the image looks real/fake?",
+  "session_id": "{sessionId}"
+}
+```
+Response `result`: plain text model response, e.g. `"The image looks fake because..."`.
+
+All `/infer` endpoints return:
 ```json
 { "job_id": "uuid" }
 ```
@@ -472,10 +565,13 @@ GET /jobs/{job_id}
   "status": "running",
   "progress": 60,
   "result_path": "/abs/path/to/output.png",
+  "result": null,
   "detail": null
 }
 ```
-`status` is one of `"pending"`, `"running"`, `"done"`, `"error"`.
+`status` is one of `"pending"`, `"running"`, `"done"`, `"error"`.  
+`result_path` is set for image-output services (IP2P, Grounded-SAM, Inpainting).  
+`result` is set for text-output services (Artifact Detector, FakeVLM).
 
 ### Abort a job
 
@@ -484,14 +580,23 @@ DELETE /jobs/{job_id}
 → 204 No Content
 ```
 
+### Release model from VRAM
+
+```
+POST /release
+→ 200 { "ok": true }
+```
+
 ---
 
 ## Development Notes
 
-- The `uv` `.python-version` files pin the Python interpreter per service. Running `uv sync` inside a service directory installs all dependencies into an isolated virtual environment automatically.
-- The Grounded-SAM service requires compiled extensions. If `uv run python setup.py` fails, check that Xcode Command Line Tools (macOS) or `build-essential` (Linux) is installed.
+- The `uv` `.python-version` files pin the Python interpreter per service. Running `uv sync` inside a service directory creates an isolated virtual environment automatically. Never run `pip install` directly; use `uv pip install` or add dependencies to `pyproject.toml`.
+- On NVIDIA machines, each service's `pyproject.toml` includes a `[tool.uv.sources]` block pointing to the PyTorch CUDA 12.1 index. If your CUDA version differs, change `cu121` to `cu118` or `cu124` in all `pyproject.toml` files and re-run `uv sync`.
+- The Grounded-SAM service requires compiled C++ extensions. If `uv run python setup.py` fails with a compiler error, install build tools first: `xcode-select --install` (macOS) or `sudo apt install build-essential python3-dev` (Ubuntu).
 - On first model load, HuggingFace weights are cached in `~/.cache/huggingface/`. Subsequent starts are fast.
 - The Next.js frontend assumes `npm run dev` is run from within the `frontend/` directory, so that `process.cwd()` resolves `../workspace` correctly. The provided `frontend/start.sh` handles this automatically.
+- FakeVLM uses 4-bit NF4 quantization via `bitsandbytes`, which requires CUDA. On MPS or CPU the quantization config is skipped and the model loads in `float32`.
 - Module-level Python dicts store in-flight job state per service process. Restarting a service clears all job state — this is acceptable for a single-user local application.
 
 ---
@@ -502,6 +607,7 @@ DELETE /jobs/{job_id}
 |---|---|---|
 | Global edit | InstructPix2Pix | Instruction-following image edit, HuggingFace native |
 | Artifact detection | Qwen2-VL-2B-Instruct | Lightweight VLM, MPS-compatible, detailed spatial understanding |
+| Experimental classifier | FakeVLM (LLaVA) | 4-bit quantized, real/fake classification |
 | Segmentation | Grounded-SAM 2 | Open-vocabulary text→mask, state-of-the-art quality |
 | Inpainting | SD2 Inpainting | Text-guided fill, HuggingFace native, fast |
 | Service isolation | uv | Per-service Python version + dependency isolation |
@@ -524,6 +630,7 @@ DELETE /jobs/{job_id}
 | **SAM 2** (Segment Anything Model 2) | Ravi et al., Meta AI, 2024 | [arxiv.org/abs/2408.00714](https://arxiv.org/abs/2408.00714) · [GitHub](https://github.com/facebookresearch/sam2) |
 | **Grounded-SAM 2** (integration) | IDEA-Research | [GitHub](https://github.com/IDEA-Research/Grounded-SAM-2) |
 | **Stable Diffusion 2 Inpainting** | Rombach et al. / Stability AI, 2022 | [arxiv.org/abs/2112.10752](https://arxiv.org/abs/2112.10752) · [HuggingFace](https://huggingface.co/stabilityai/stable-diffusion-2-inpainting) |
+| **LLaVA** (FakeVLM base) | Liu et al., 2023 | [arxiv.org/abs/2304.08485](https://arxiv.org/abs/2304.08485) · [HuggingFace](https://huggingface.co/lingcco/fakeVLM) |
 
 ### Python Libraries
 
@@ -532,8 +639,9 @@ DELETE /jobs/{job_id}
 | [PyTorch](https://pytorch.org/) | ≥ 2.2 | Deep learning runtime; MPS / CUDA / CPU backend |
 | [torchvision](https://pytorch.org/vision/) | ≥ 0.17 | Image transforms used by Grounding DINO |
 | [diffusers](https://github.com/huggingface/diffusers) | ≥ 0.27 | InstructPix2Pix and SD2 Inpainting pipelines |
-| [transformers](https://github.com/huggingface/transformers) | ≥ 4.40 | Qwen2-VL model loading and tokenization |
+| [transformers](https://github.com/huggingface/transformers) | ≥ 4.40 | Qwen2-VL and FakeVLM model loading and tokenization |
 | [accelerate](https://github.com/huggingface/accelerate) | ≥ 0.29 | Device placement helper for HuggingFace models |
+| [bitsandbytes](https://github.com/TimDettmers/bitsandbytes) | ≥ 0.41 | 4-bit NF4 quantization for FakeVLM (CUDA only) |
 | [qwen-vl-utils](https://github.com/QwenLM/Qwen2-VL) | ≥ 0.0.8 | Image preprocessing utilities for Qwen2-VL |
 | [FastAPI](https://fastapi.tiangolo.com/) | ≥ 0.111 | Async HTTP microservice framework |
 | [uvicorn](https://www.uvicorn.org/) | ≥ 0.29 | ASGI server for FastAPI |

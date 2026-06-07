@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
+import Link from "next/link";
 import { PipelineState, SSEMessage } from "@/lib/types";
 import Dropzone from "@/components/Dropzone";
 import PromptPanel from "@/components/PromptPanel";
@@ -166,12 +167,20 @@ export default function Home() {
             <h1 className="text-xl font-bold">AI Artifact Repair Pipeline</h1>
             <p className="text-xs text-zinc-500 mt-0.5">InstructPix2Pix → Detection → Mask → Inpainting</p>
           </div>
-          <button
-            onClick={handleReset}
-            className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 transition-colors"
-          >
-            Reset
-          </button>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/test"
+              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 transition-colors"
+            >
+              Test Services
+            </Link>
+            <button
+              onClick={handleReset}
+              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 transition-colors"
+            >
+              Reset
+            </button>
+          </div>
         </div>
 
         {/* Main grid */}
