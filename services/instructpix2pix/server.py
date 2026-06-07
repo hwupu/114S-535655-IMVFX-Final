@@ -8,12 +8,20 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 sys.path.append(str(Path(__file__).parent.parent / "shared"))
-from device import get_device
+from device import get_device, flush_memory
 
 app = FastAPI(title="InstructPix2Pix Service")
 
 _jobs: dict[str, dict] = {}
 _pipeline = None
+
+
+def _unload() -> None:
+    global _pipeline
+    if _pipeline is not None:
+        del _pipeline
+        _pipeline = None
+    flush_memory()
 
 
 def _load_pipeline():
@@ -76,10 +84,18 @@ def _run_job(job_id: str, req: InferRequest):
     except Exception as exc:
         job["status"] = "error"
         job["detail"] = str(exc)
+    finally:
+        _unload()
 
 
 @app.get("/health")
 def health():
+    return {"ok": True}
+
+
+@app.post("/release")
+def release():
+    _unload()
     return {"ok": True}
 
 

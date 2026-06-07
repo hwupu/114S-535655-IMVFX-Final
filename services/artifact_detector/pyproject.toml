@@ -12,3 +12,19 @@ dependencies = [
     "pillow>=10.0",
     "qwen-vl-utils>=0.0.8",
 ]
+
+# On Linux/Windows: install CUDA 12.1 wheels from pytorch.org
+# On macOS: fall back to PyPI (includes MPS support)
+# Change cu121 → cu118 / cu124 to match your installed CUDA version.
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu121", marker = "sys_platform != 'darwin'" },
+]
+torchvision = [
+    { index = "pytorch-cu121", marker = "sys_platform != 'darwin'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true

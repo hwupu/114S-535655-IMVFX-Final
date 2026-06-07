@@ -31,13 +31,13 @@ gdino_dir = HERE / "vendor" / "GroundingDINO"
 if not gdino_dir.exists():
     gdino_dir.parent.mkdir(exist_ok=True)
     run(["git", "clone", "https://github.com/IDEA-Research/GroundingDINO.git", str(gdino_dir)])
-run([sys.executable, "-m", "pip", "install", "-e", str(gdino_dir)])
+run(["uv", "pip", "install", "-e", str(gdino_dir)])
 
 # Install SAM 2
 sam2_dir = HERE / "vendor" / "sam2"
 if not sam2_dir.exists():
     run(["git", "clone", "https://github.com/facebookresearch/sam2.git", str(sam2_dir)])
-run([sys.executable, "-m", "pip", "install", "-e", str(sam2_dir)])
+run(["uv", "pip", "install", "-e", str(sam2_dir)])
 
 # Download Grounding DINO checkpoint
 download(
