@@ -3,6 +3,7 @@ const PORTS = {
   artifact_detector: 8002,
   grounded_sam: 8003,
   inpainting: 8004,
+  fakevlm: 8005,
 } as const;
 
 type ServiceName = keyof typeof PORTS;

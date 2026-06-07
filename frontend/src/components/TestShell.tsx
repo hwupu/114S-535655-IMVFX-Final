@@ -15,10 +15,10 @@ export default function TestShell({ title, port, description, children }: Props)
       <div className="mx-auto max-w-5xl space-y-6">
         <div className="flex items-start gap-4">
           <Link
-            href="/test"
+            href="/"
             className="mt-1 shrink-0 rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:border-zinc-500 hover:text-zinc-200"
           >
-            ← Services
+            ← Home
           </Link>
           <div>
             <div className="flex items-center gap-2">

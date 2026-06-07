@@ -1,267 +1,159 @@
-"use client";
-
-import { useState, useRef, useCallback } from "react";
 import Link from "next/link";
-import { PipelineState, SSEMessage } from "@/lib/types";
-import Dropzone from "@/components/Dropzone";
-import PromptPanel from "@/components/PromptPanel";
-import PipelineStatus from "@/components/PipelineStatus";
-import MaskCanvas from "@/components/MaskCanvas";
-import ResultPanel from "@/components/ResultPanel";
 
-const INITIAL: PipelineState = {
-  stage: "idle",
-  sessionId: null,
-  prompt: "",
-  originalImageUrl: null,
-  stage1OutputUrl: null,
-  artifacts: [],
-  maskUrl: null,
-  resultUrl: null,
-  progress: 0,
-  stageProgress: {},
-  error: null,
+const SERVICES = [
+  {
+    slug: "instructpix2pix",
+    name: "InstructPix2Pix",
+    port: 8001,
+    description: "Global style edit via text instruction",
+    inputs: "Image + prompt",
+    output: "Edited image",
+    color: "indigo",
+  },
+  {
+    slug: "fakevlm",
+    name: "FakeVLM",
+    port: 8005,
+    description: "LLaVA-based real/fake image classifier",
+    inputs: "Image",
+    output: "Text verdict",
+    color: "violet",
+  },
+  {
+    slug: "artifact-detector",
+    name: "Artifact Detector",
+    port: 8002,
+    description: "Qwen2-VL detects AI-generated visual artifacts",
+    inputs: "Image",
+    output: "Artifact list",
+    color: "amber",
+  },
+  {
+    slug: "grounded-sam",
+    name: "Grounded-SAM",
+    port: 8003,
+    description: "Text-guided segmentation mask generation",
+    inputs: "Image + artifact descriptions",
+    output: "Mask image",
+    color: "emerald",
+  },
+  {
+    slug: "inpainting",
+    name: "SD2 Inpainting",
+    port: 8004,
+    description: "Text-guided local image repair",
+    inputs: "Image + mask + prompt",
+    output: "Repaired image",
+    color: "rose",
+  },
+];
+
+const colorMap: Record<string, string> = {
+  indigo: "border-indigo-700/50 hover:border-indigo-500",
+  violet: "border-violet-700/50 hover:border-violet-500",
+  amber: "border-amber-700/50 hover:border-amber-500",
+  emerald: "border-emerald-700/50 hover:border-emerald-500",
+  rose: "border-rose-700/50 hover:border-rose-500",
 };
 
-function imageApiUrl(sessionRelPath: string) {
-  const [sessionId, filename] = sessionRelPath.split("/");
-  return `/api/images/${sessionId}/${filename}`;
-}
+const badgeMap: Record<string, string> = {
+  indigo: "bg-indigo-900/50 text-indigo-300",
+  violet: "bg-violet-900/50 text-violet-300",
+  amber: "bg-amber-900/50 text-amber-300",
+  emerald: "bg-emerald-900/50 text-emerald-300",
+  rose: "bg-rose-900/50 text-rose-300",
+};
 
-export default function Home() {
-  const [state, setState] = useState<PipelineState>(INITIAL);
-  const [pendingMaskBlob, setPendingMaskBlob] = useState<Blob | null>(null);
-  const readerRef = useRef<ReadableStreamDefaultReader | null>(null);
-
-  function patch(p: Partial<PipelineState>) {
-    setState((s) => ({ ...s, ...p }));
-  }
-
-  // ── File upload ───────────────────────────────────────────────────────────
-  async function handleFile(file: File) {
-    patch({ stage: "uploading", originalImageUrl: URL.createObjectURL(file) });
-    const form = new FormData();
-    form.append("image", file);
-    const res = await fetch("/api/upload", { method: "POST", body: form });
-    if (!res.ok) { patch({ stage: "error", error: "Upload failed" }); return; }
-    const { sessionId } = await res.json();
-    patch({ sessionId, stage: "idle" });
-  }
-
-  // ── SSE stream helper ─────────────────────────────────────────────────────
-  function openSSE(sessionId: string, prompt: string, fromStage: number, artifacts?: string[]) {
-    readerRef.current?.cancel();
-
-    fetch("/api/pipeline/start", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId, prompt, fromStage, artifacts }),
-    }).then(async (res) => {
-      if (!res.body) return;
-      const reader = res.body.getReader();
-      readerRef.current = reader;
-      const dec = new TextDecoder();
-      let buf = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        const parts = buf.split("\n\n");
-        buf = parts.pop() ?? "";
-        for (const part of parts) {
-          if (!part.startsWith("data: ")) continue;
-          try {
-            handleMsg(JSON.parse(part.slice(6)));
-          } catch { /* skip malformed */ }
-        }
-      }
-    });
-  }
-
-  function handleMsg(msg: SSEMessage) {
-    setState((prev) => {
-      const next = { ...prev };
-
-      if (typeof msg.stage === "number") {
-        next.stage = `stage${msg.stage}` as PipelineState["stage"];
-        next.stageProgress = {
-          ...prev.stageProgress,
-          [msg.stage]: msg.progress ?? prev.stageProgress[msg.stage] ?? 0,
-        };
-        if (msg.status === "done") {
-          if (msg.stage === 1 && msg.resultPath) next.stage1OutputUrl = imageApiUrl(msg.resultPath);
-          if (msg.stage === 2 && msg.artifacts)  next.artifacts = msg.artifacts;
-          if (msg.stage === 3 && msg.maskPath)   next.maskUrl = imageApiUrl(msg.maskPath);
-          if (msg.stage === 4 && msg.resultPath) next.resultUrl = imageApiUrl(msg.resultPath);
-        }
-      }
-
-      if (msg.stage === "mask_review") {
-        next.stage = "mask_review";
-        if (msg.maskPath) next.maskUrl = imageApiUrl(msg.maskPath);
-      }
-      if (msg.stage === "no_artifacts") next.stage = "no_artifacts";
-      if (msg.stage === "done") {
-        next.stage = "done";
-        next.stageProgress = { 1: 100, 2: 100, 3: 100, 4: 100 };
-      }
-      if (msg.stage === "aborted") next.stage = "aborted";
-      if (msg.stage === "error" || msg.status === "error") {
-        next.stage = "error";
-        next.error = msg.error ?? "Unknown error";
-      }
-
-      return next;
-    });
-  }
-
-  // ── Abort ─────────────────────────────────────────────────────────────────
-  async function handleAbort() {
-    readerRef.current?.cancel();
-    if (!state.sessionId) return;
-    await fetch("/api/pipeline/abort", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId: state.sessionId }),
-    });
-    setState((prev) => {
-      const revert: PipelineState["stage"] =
-        prev.stage === "stage1" ? "idle" :
-        prev.stage === "stage2" ? "stage1" :
-        prev.stage === "stage3" ? "stage2" :
-        prev.stage === "stage4" ? "mask_review" : "idle";
-      return { ...prev, stage: revert, error: null };
-    });
-  }
-
-  // ── Continue after mask review ────────────────────────────────────────────
-  async function handleContinue() {
-    if (!state.sessionId) return;
-    if (pendingMaskBlob) {
-      const form = new FormData();
-      form.append("image", pendingMaskBlob, "stage3_mask.png");
-      form.append("sessionId", state.sessionId);
-      await fetch("/api/upload/mask", { method: "POST", body: form });
-    }
-    openSSE(state.sessionId, state.prompt, 4, state.artifacts);
-  }
-
-  // ── Reset ─────────────────────────────────────────────────────────────────
-  const handleReset = useCallback(() => {
-    readerRef.current?.cancel();
-    setState(INITIAL);
-    setPendingMaskBlob(null);
-  }, []);
-
-  const isRunning = ["uploading", "stage1", "stage2", "stage3", "stage4"].includes(state.stage);
-  const canStart = !isRunning && state.sessionId && state.prompt && state.stage !== "mask_review";
-
+export default function HomePage() {
   return (
-    <main className="min-h-screen bg-zinc-950 text-zinc-100 p-6">
-      <div className="mx-auto max-w-5xl space-y-6">
+    <main className="min-h-screen bg-zinc-950 p-6 text-zinc-100">
+      <div className="mx-auto max-w-4xl space-y-8">
 
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-bold">AI Artifact Repair Pipeline</h1>
-            <p className="text-xs text-zinc-500 mt-0.5">InstructPix2Pix → Detection → Mask → Inpainting</p>
+        <div>
+          <h1 className="text-2xl font-bold">AI Artifact Repair</h1>
+          <p className="mt-1 text-sm text-zinc-500">
+            NYCU 535655 IMVFX Final · Choose a mode below
+          </p>
+        </div>
+
+        {/* Main pipeline — featured card */}
+        <Link
+          href="/pipeline"
+          className="group flex items-center justify-between rounded-xl border border-indigo-600/60 bg-indigo-950/40 p-6 transition-all hover:border-indigo-400 hover:bg-indigo-950/60"
+        >
+          <div className="space-y-1">
+            <div className="flex items-center gap-3">
+              <span className="text-lg font-semibold text-indigo-100 group-hover:text-white">
+                Main Pipeline
+              </span>
+              <span className="rounded-full bg-indigo-800/60 px-2.5 py-0.5 text-xs text-indigo-300">
+                Full pipeline
+              </span>
+            </div>
+            <p className="text-sm text-indigo-300/70">
+              InstructPix2Pix → FakeVLM detection → Grounded-SAM mask → SD2 Inpainting
+            </p>
+            <p className="text-xs text-zinc-500">
+              Upload an image + instruction to run the complete artifact repair chain
+            </p>
           </div>
-          <div className="flex items-center gap-2">
-            <Link
-              href="/test"
-              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 transition-colors"
-            >
-              Test Services
-            </Link>
-            <button
-              onClick={handleReset}
-              className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 transition-colors"
-            >
-              Reset
-            </button>
+          <span className="ml-6 shrink-0 text-xl text-indigo-600 transition-colors group-hover:text-indigo-300">
+            →
+          </span>
+        </Link>
+
+        {/* Service test pages */}
+        <div>
+          <h2 className="mb-3 text-sm font-medium text-zinc-400">
+            Individual service tests
+          </h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {SERVICES.map((svc) => (
+              <Link
+                key={svc.slug}
+                href={`/test/${svc.slug}`}
+                className={[
+                  "group rounded-xl border bg-zinc-900 p-5 transition-all hover:bg-zinc-800",
+                  colorMap[svc.color],
+                ].join(" ")}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-zinc-100 group-hover:text-white">
+                        {svc.name}
+                      </span>
+                      <span
+                        className={[
+                          "rounded-full px-2 py-0.5 font-mono text-xs",
+                          badgeMap[svc.color],
+                        ].join(" ")}
+                      >
+                        :{svc.port}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm text-zinc-400">{svc.description}</p>
+                  </div>
+                  <span className="mt-0.5 shrink-0 text-zinc-600 transition-colors group-hover:text-zinc-400">
+                    →
+                  </span>
+                </div>
+                <div className="mt-3 flex gap-4 text-xs text-zinc-500">
+                  <span>
+                    <span className="text-zinc-600">in: </span>
+                    {svc.inputs}
+                  </span>
+                  <span>
+                    <span className="text-zinc-600">out: </span>
+                    {svc.output}
+                  </span>
+                </div>
+              </Link>
+            ))}
           </div>
         </div>
 
-        {/* Main grid */}
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          {/* Left — input */}
-          <div className="space-y-4">
-            <Dropzone
-              onFile={handleFile}
-              disabled={isRunning || state.stage === "mask_review"}
-              currentImageUrl={state.originalImageUrl}
-            />
-            <PromptPanel
-              value={state.prompt}
-              onChange={(v) => patch({ prompt: v })}
-              disabled={isRunning || state.stage === "mask_review"}
-            />
-            <div className="flex gap-3">
-              {state.stage !== "mask_review" && (
-                <button
-                  onClick={() => state.sessionId && openSSE(state.sessionId, state.prompt, 1)}
-                  disabled={!canStart}
-                  className="flex-1 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  {isRunning ? "Running…" : "Start"}
-                </button>
-              )}
-              {isRunning && (
-                <button
-                  onClick={handleAbort}
-                  className="rounded-lg border border-red-700 px-4 py-2.5 text-sm font-medium text-red-400 hover:bg-red-950 transition-colors"
-                >
-                  Abort
-                </button>
-              )}
-            </div>
-            {state.error && (
-              <p className="rounded-lg bg-red-950/40 border border-red-800/50 p-3 text-xs text-red-300">
-                {state.error}
-              </p>
-            )}
-          </div>
-
-          {/* Right — status + results */}
-          <div className="space-y-4">
-            <PipelineStatus stage={state.stage} stageProgress={state.stageProgress} artifacts={state.artifacts} />
-            <ResultPanel
-              originalUrl={state.originalImageUrl}
-              maskUrl={state.maskUrl}
-              resultUrl={state.resultUrl}
-              stage1Url={state.stage1OutputUrl}
-            />
-          </div>
-        </div>
-
-        {/* Mask editor (full-width, shown during mask_review) */}
-        {(state.stage === "mask_review") && state.stage1OutputUrl && state.maskUrl && (
-          <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-4 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold">Mask Editor</h3>
-              <div className="flex gap-3">
-                <button
-                  onClick={handleAbort}
-                  className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 hover:border-zinc-500"
-                >
-                  Back
-                </button>
-                <button
-                  onClick={handleContinue}
-                  className="rounded-lg bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-indigo-500"
-                >
-                  Continue to Inpainting →
-                </button>
-              </div>
-            </div>
-            <MaskCanvas
-              baseImageUrl={state.stage1OutputUrl}
-              maskUrl={state.maskUrl}
-              onMaskChange={setPendingMaskBlob}
-            />
-          </div>
-        )}
       </div>
     </main>
   );

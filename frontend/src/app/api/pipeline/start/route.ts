@@ -87,20 +87,28 @@ export async function POST(req: NextRequest) {
           send({ stage: 1, status: "done", progress: 100, resultPath: `${sessionId}/stage1_output.png` });
         }
 
-        // Stage 2 — Artifact Detection
+        // Stage 2 — Artifact Detection (FakeVLM)
         if (fromStage <= 2) {
-          const { ok, status } = await runStage(2, "artifact_detector", {
+          const { ok, status } = await runStage(2, "fakevlm", {
             image_path: path.join(sessionDir, "stage1_output.png"),
+            prompt:
+              "<image>List any visual artifacts in this image, such as extra fingers, " +
+              "deformed faces, unnatural textures, or asymmetric features. " +
+              "If the image looks correct and realistic, reply with exactly: NO_ARTIFACTS",
             session_id: sessionId,
           });
           if (!ok) { controller.close(); return; }
 
-          const detResult = status!.result as { has_artifacts: boolean; artifacts: string[] };
-          const detected = detResult.artifacts ?? [];
+          const rawText = (status!.result as string | null) ?? "";
+          const hasArtifacts = !/NO_ARTIFACTS/i.test(rawText) && rawText.trim().length > 0;
+          const detected = hasArtifacts
+            ? rawText.split(/[.\n]+/).map((s) => s.trim()).filter((s) => s.length > 4)
+            : [];
+
           sessionArtifacts.set(sessionId, detected);
           send({ stage: 2, status: "done", progress: 100, artifacts: detected });
 
-          if (!detResult.has_artifacts) {
+          if (!hasArtifacts) {
             send({ stage: "no_artifacts", status: "done" });
             controller.close();
             return;

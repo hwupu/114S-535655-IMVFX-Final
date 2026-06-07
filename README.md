@@ -26,8 +26,8 @@ User photo + instruction
             │  intermediate image
             ▼
 ┌───────────────────────┐
-│  Stage 2              │  Qwen2-VL-2B-Instruct
-│  Artifact Detection   │  Visual language model
+│  Stage 2              │  FakeVLM (lingcco/fakeVLM)
+│  Artifact Detection   │  LLaVA-based multimodal VLM
 └───────────┬───────────┘
             │
      ┌──────┴──────┐
@@ -74,27 +74,32 @@ The input image is resized to 512×512 before inference (the model's native reso
 
 ---
 
-### Stage 2 — Artifact Detection (Qwen2-VL-2B-Instruct)
+### Stage 2 — Artifact Detection (FakeVLM)
 
-**Model:** `Qwen/Qwen2-VL-2B-Instruct` via HuggingFace `transformers`  
-**Port:** 8002 · Python 3.11
+**Model:** `lingcco/fakeVLM` via HuggingFace `transformers`  
+**Port:** 8005 · Python 3.11
 
-A Vision-Language Model (VLM) is used to analyze the Stage 1 output and produce a structured list of any visual artifacts. Qwen2-VL-2B was chosen because:
-
-- At ~2 GB it runs comfortably on Apple Silicon (MPS) and NVIDIA GPUs
-- It understands fine-grained spatial detail well enough to identify anatomical defects
-- It is natively available via HuggingFace — no custom installation required
-- Inference is fast enough for interactive use (~5–15 s depending on hardware)
-
-The model is prompted with a detailed system instruction that asks it to enumerate artifacts like six fingers, deformed hands, incorrect facial features, unnatural textures, asymmetric body parts, and uneven fill patterns. If the image is clean it replies with the sentinel `NO_ARTIFACTS`; otherwise it returns a line-separated list of descriptions such as:
+FakeVLM (Wen et al., NeurIPS 2025) is a LLaVA-based multimodal model trained specifically for synthetic image detection and artifact explanation. In the pipeline it is prompted to enumerate specific visual defects rather than return a binary verdict:
 
 ```
-six fingers on right hand
-deformed left eye
-uneven texture on background
+<image>List any visual artifacts in this image, such as extra fingers,
+deformed faces, unnatural textures, or asymmetric features.
+If the image looks correct and realistic, reply with exactly: NO_ARTIFACTS
 ```
 
-These text descriptions serve a dual purpose: they are shown to the user in the UI, and they are passed directly to Stage 3 as grounding queries.
+If the image is clean the model replies `NO_ARTIFACTS` and the pipeline terminates early (no mask generation or inpainting needed). Otherwise the response is split into per-artifact descriptions:
+
+```
+extra fingers on right hand
+deformed facial geometry around the left eye
+uneven fill pattern on the background wall
+```
+
+These descriptions are passed directly to Stage 3 as text grounding queries for GroundingDINO.
+
+The model uses 4-bit NF4 quantization (BitsAndBytes) on CUDA for memory efficiency (~7 GB quantized vs ~28 GB unquantized). On MPS or CPU, quantization is disabled and the model runs in `float32`.
+
+> **Note:** `Qwen/Qwen2-VL-2B-Instruct` (port 8002) remains available as a standalone service for comparison via the `/test/artifact-detector` test page, but is no longer used in the main pipeline.
 
 ---
 
@@ -159,14 +164,12 @@ SD2 Inpainting was selected as the best practical starting point: the text guida
 
 ---
 
-### Experimental Service — FakeVLM (Port 8005)
+### Standalone Service — Qwen2-VL Artifact Detector (Port 8002)
 
-**Model:** `lingcco/fakeVLM` — LLaVA-based real/fake image classifier  
-**Port:** 8005 · Python 3.11
+**Model:** `Qwen/Qwen2-VL-2B-Instruct` via HuggingFace `transformers`  
+**Port:** 8002 · Python 3.11
 
-FakeVLM is an experimental addition that classifies whether an image appears to be real or AI-generated, returning a natural-language verdict. It is **not** part of the main pipeline; it runs as a standalone service and can be tested independently via the test interface at `/test/fakevlm`.
-
-The model uses 4-bit NF4 quantization (BitsAndBytes) on CUDA for memory efficiency. On MPS or CPU, quantization is disabled and the model runs in `float32`.
+Qwen2-VL-2B is a lightweight VLM (~2 GB) that runs on Apple Silicon (MPS) and NVIDIA GPUs. It was the original Stage 2 detector and remains available as a standalone service for comparison testing via `/test/artifact-detector`. Its structured output format (`{ has_artifacts, artifacts[] }`) differs from FakeVLM's free-text response.
 
 ---
 
@@ -226,10 +229,10 @@ Jobs run in background threads so the FastAPI server stays responsive for status
 | Service | Port | Model |
 |---|---|---|
 | InstructPix2Pix | 8001 | timbrooks/instruct-pix2pix |
-| Artifact Detector | 8002 | Qwen/Qwen2-VL-2B-Instruct |
+| Qwen2-VL Detector *(standalone)* | 8002 | Qwen/Qwen2-VL-2B-Instruct |
 | Grounded-SAM | 8003 | GroundingDINO + SAM 2 |
 | SD Inpainting | 8004 | stabilityai/stable-diffusion-2-inpainting |
-| FakeVLM *(experimental)* | 8005 | lingcco/fakeVLM |
+| FakeVLM *(Stage 2 — pipeline)* | 8005 | lingcco/fakeVLM |
 | Next.js frontend | 3000 | — |
 
 ### Next.js frontend
@@ -316,10 +319,11 @@ The workspace directory is `.gitignore`d. Session files persist across aborts so
     ├── start.sh
     ├── src/
     │   ├── app/
-    │   │   ├── page.tsx                ← main UI, pipeline state machine
+    │   │   ├── page.tsx                ← landing page (pipeline card + service cards)
     │   │   ├── layout.tsx
+    │   │   ├── pipeline/
+    │   │   │   └── page.tsx            ← full pipeline UI
     │   │   ├── test/
-    │   │   │   ├── page.tsx            ← service test dashboard
     │   │   │   ├── instructpix2pix/page.tsx
     │   │   │   ├── fakevlm/page.tsx
     │   │   │   ├── artifact-detector/page.tsx
@@ -355,16 +359,24 @@ The workspace directory is `.gitignore`d. Session files persist across aborts so
 ### Prerequisites
 
 - [uv](https://docs.astral.sh/uv/) — Python package and environment manager
-- Node.js 20+ and npm
+- Node.js 20+ with [Corepack](https://nodejs.org/api/corepack.html) enabled (`corepack enable`)
 - Python 3.10 and 3.11 (uv will download and manage them automatically)
 - ~25 GB free disk space for model weights and Python environments
 - NVIDIA GPU (recommended) or Apple Silicon Mac; CPU-only is supported but slow
 
 ### 1. Install Node dependencies
 
+The frontend uses [pnpm](https://pnpm.io/) managed via Corepack. Node.js ships with Corepack; enable it once if you haven't already:
+
+```bash
+corepack enable
+```
+
+Then install dependencies — pnpm version is pinned in `package.json` (`"packageManager": "pnpm@10.30.0"`), so Corepack will use the correct version automatically:
+
 ```bash
 cd frontend
-npm install
+pnpm install
 ```
 
 ### 2. Install Python dependencies for each service
@@ -440,10 +452,10 @@ bash services/instructpix2pix/start.sh
 
 ```bash
 bash frontend/start.sh
-# or: cd frontend && npm run dev
+# or: cd frontend && pnpm dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000) — this shows the landing page where you choose the main pipeline or a service test page.
 
 ### Health check
 
@@ -452,7 +464,7 @@ curl http://localhost:8001/health   # InstructPix2Pix
 curl http://localhost:8002/health   # Artifact Detector
 curl http://localhost:8003/health   # Grounded-SAM
 curl http://localhost:8004/health   # SD Inpainting
-curl http://localhost:8005/health   # FakeVLM (experimental)
+curl http://localhost:8005/health   # FakeVLM (Stage 2 — pipeline)
 ```
 
 ---
@@ -461,11 +473,13 @@ curl http://localhost:8005/health   # FakeVLM (experimental)
 
 ### Main pipeline
 
+Navigate to [http://localhost:3000](http://localhost:3000) and click **Main Pipeline**, or go directly to [http://localhost:3000/pipeline](http://localhost:3000/pipeline).
+
 1. **Drop an image** onto the upload area, or click to browse.
 2. **Choose or type an instruction** — e.g., "make it look like a painting".
 3. **Click Start.** The interface shows live stage progress:
    - Stage 1 runs InstructPix2Pix on your image.
-   - Stage 2 analyzes the result with Qwen2-VL. If no artifacts are found, the pipeline completes here.
+   - Stage 2 analyzes the result with FakeVLM. If no artifacts are found, the pipeline completes here.
    - Stage 3 generates a pixel mask over the detected artifact regions.
 4. **Review the mask.** Optionally paint corrections with the circular brush (draw to add, erase to remove). Click **Continue to Inpainting**.
 5. Stage 4 fills the masked region with SD Inpainting, guided by the artifact descriptions.
@@ -475,13 +489,13 @@ curl http://localhost:8005/health   # FakeVLM (experimental)
 
 ### Service test pages
 
-Each model can be tested independently at [http://localhost:3000/test](http://localhost:3000/test). A test page is available for every service:
+Each model can be tested independently from the landing page at [http://localhost:3000](http://localhost:3000). A test page is available for every service:
 
 | URL | What to test |
 |---|---|
 | `/test/instructpix2pix` | Upload image + type prompt → see edited image |
-| `/test/fakevlm` | Upload image → get real/fake verdict text |
-| `/test/artifact-detector` | Upload image → see detected artifact list |
+| `/test/fakevlm` | Upload image → get real/fake verdict text (pipeline Stage 2) |
+| `/test/artifact-detector` | Upload image → see Qwen2-VL artifact list (standalone comparison) |
 | `/test/grounded-sam` | Upload image + type artifact descriptions → see segmentation mask |
 | `/test/inpainting` | Upload image + mask + type prompt → see inpainted result |
 
@@ -544,11 +558,12 @@ Response `result`:
 ```json
 {
   "image_path": "...",
-  "prompt": "<image>Does the image looks real/fake?",
+  "prompt": "<image>List any visual artifacts in this image, such as extra fingers, deformed faces, unnatural textures, or asymmetric features. If the image looks correct and realistic, reply with exactly: NO_ARTIFACTS",
   "session_id": "{sessionId}"
 }
 ```
-Response `result`: plain text model response, e.g. `"The image looks fake because..."`.
+Response `result`: plain text — either `"NO_ARTIFACTS"` or a description of detected artifacts.  
+Default test-page prompt: `"<image>Does the image looks real/fake?"`
 
 All `/infer` endpoints return:
 ```json
@@ -595,7 +610,7 @@ POST /release
 - On NVIDIA machines, each service's `pyproject.toml` includes a `[tool.uv.sources]` block pointing to the PyTorch CUDA 12.1 index. If your CUDA version differs, change `cu121` to `cu118` or `cu124` in all `pyproject.toml` files and re-run `uv sync`.
 - The Grounded-SAM service requires compiled C++ extensions. If `uv run python setup.py` fails with a compiler error, install build tools first: `xcode-select --install` (macOS) or `sudo apt install build-essential python3-dev` (Ubuntu).
 - On first model load, HuggingFace weights are cached in `~/.cache/huggingface/`. Subsequent starts are fast.
-- The Next.js frontend assumes `npm run dev` is run from within the `frontend/` directory, so that `process.cwd()` resolves `../workspace` correctly. The provided `frontend/start.sh` handles this automatically.
+- The Next.js frontend assumes `pnpm dev` is run from within the `frontend/` directory, so that `process.cwd()` resolves `../workspace` correctly. The provided `frontend/start.sh` handles this automatically.
 - FakeVLM uses 4-bit NF4 quantization via `bitsandbytes`, which requires CUDA. On MPS or CPU the quantization config is skipped and the model loads in `float32`.
 - Module-level Python dicts store in-flight job state per service process. Restarting a service clears all job state — this is acceptable for a single-user local application.
 
@@ -606,8 +621,8 @@ POST /release
 | Component | Technology | Reason |
 |---|---|---|
 | Global edit | InstructPix2Pix | Instruction-following image edit, HuggingFace native |
-| Artifact detection | Qwen2-VL-2B-Instruct | Lightweight VLM, MPS-compatible, detailed spatial understanding |
-| Experimental classifier | FakeVLM (LLaVA) | 4-bit quantized, real/fake classification |
+| Artifact detection (pipeline) | FakeVLM (lingcco/fakeVLM) | Trained for synthetic image detection + artifact explanation; 4-bit quantized |
+| Artifact detection (standalone) | Qwen2-VL-2B-Instruct | Lightweight, MPS-compatible, structured output; available for comparison |
 | Segmentation | Grounded-SAM 2 | Open-vocabulary text→mask, state-of-the-art quality |
 | Inpainting | SD2 Inpainting | Text-guided fill, HuggingFace native, fast |
 | Service isolation | uv | Per-service Python version + dependency isolation |
@@ -630,7 +645,8 @@ POST /release
 | **SAM 2** (Segment Anything Model 2) | Ravi et al., Meta AI, 2024 | [arxiv.org/abs/2408.00714](https://arxiv.org/abs/2408.00714) · [GitHub](https://github.com/facebookresearch/sam2) |
 | **Grounded-SAM 2** (integration) | IDEA-Research | [GitHub](https://github.com/IDEA-Research/Grounded-SAM-2) |
 | **Stable Diffusion 2 Inpainting** | Rombach et al. / Stability AI, 2022 | [arxiv.org/abs/2112.10752](https://arxiv.org/abs/2112.10752) · [HuggingFace](https://huggingface.co/stabilityai/stable-diffusion-2-inpainting) |
-| **LLaVA** (FakeVLM base) | Liu et al., 2023 | [arxiv.org/abs/2304.08485](https://arxiv.org/abs/2304.08485) · [HuggingFace](https://huggingface.co/lingcco/fakeVLM) |
+| **FakeVLM** — "Spot the Fake" | Wen, Siwei et al., NeurIPS 2025 | Wen, S. et al. "Spot the fake: Large multimodal model-based synthetic image detection with artifact explanation." *Advances in Neural Information Processing Systems* 38 (2026): 58972–59005. · [HuggingFace](https://huggingface.co/lingcco/fakeVLM) |
+| **LLaVA** (FakeVLM base architecture) | Liu et al., 2023 | [arxiv.org/abs/2304.08485](https://arxiv.org/abs/2304.08485) |
 
 ### Python Libraries
 
@@ -667,4 +683,5 @@ POST /release
 | Tool | Purpose |
 |---|---|
 | [uv](https://docs.astral.sh/uv/) | Fast Python package manager; per-service environment and Python version isolation |
+| [pnpm](https://pnpm.io/) (via Corepack) | Fast, disk-efficient Node.js package manager; version pinned via `"packageManager"` in `package.json` |
 | [HuggingFace Hub](https://huggingface.co/) | Model weight hosting and `transformers`/`diffusers` integration |
