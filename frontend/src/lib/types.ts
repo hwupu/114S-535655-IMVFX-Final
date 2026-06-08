@@ -17,7 +17,8 @@ export interface PipelineState {
   prompt: string;
   originalImageUrl: string | null;   // uploaded file, object URL
   stage1OutputUrl: string | null;    // /api/images/:session/stage1_output.png
-  artifacts: string[];               // VLM descriptions
+  artifacts: string[];               // VLM descriptions (parsed)
+  stage2RawText: string | null;      // raw model response, for debugging
   maskUrl: string | null;            // /api/images/:session/stage3_mask.png
   resultUrl: string | null;          // /api/images/:session/stage4_result.png
   progress: number;                  // 0-100 for the current running stage
@@ -30,6 +31,7 @@ export interface SSEMessage {
   status: "running" | "done" | "waiting" | "aborted" | "error";
   progress?: number;
   artifacts?: string[];
+  rawText?: string;      // stage 2: unprocessed model response
   resultPath?: string;  // session-relative: "{sessionId}/filename"
   maskPath?: string;
   error?: string;

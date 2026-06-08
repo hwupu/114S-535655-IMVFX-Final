@@ -16,6 +16,7 @@ const INITIAL: PipelineState = {
   originalImageUrl: null,
   stage1OutputUrl: null,
   artifacts: [],
+  stage2RawText: null,
   maskUrl: null,
   resultUrl: null,
   progress: 0,
@@ -160,7 +161,10 @@ export default function PipelinePage() {
         };
         if (msg.status === "done") {
           if (msg.stage === 1 && msg.resultPath) next.stage1OutputUrl = imageApiUrl(msg.resultPath);
-          if (msg.stage === 2 && msg.artifacts)  next.artifacts = msg.artifacts;
+          if (msg.stage === 2) {
+            if (msg.artifacts)  next.artifacts = msg.artifacts;
+            if (msg.rawText != null) next.stage2RawText = msg.rawText;
+          }
           if (msg.stage === 3 && msg.maskPath)   next.maskUrl = imageApiUrl(msg.maskPath);
           if (msg.stage === 4 && msg.resultPath) next.resultUrl = imageApiUrl(msg.resultPath);
         }
@@ -374,23 +378,12 @@ export default function PipelinePage() {
                 num={2} label="Detection"
                 status={stageStatus(2)} progress={sp[2]}
               >
-                {s === "stage2" ? (
-                  <Placeholder text="Analyzing image…" />
-                ) : s === "no_artifacts" ? (
-                  <p className="text-xs text-emerald-400 text-center px-2">
-                    ✓ No artifacts detected<br />
-                    <span className="text-zinc-500">Pipeline ended early</span>
+                {state.stage2RawText != null ? (
+                  <p className="text-[11px] text-zinc-300 leading-relaxed whitespace-pre-wrap break-words max-w-full">
+                    {state.stage2RawText || <span className="text-zinc-600">(empty response)</span>}
                   </p>
-                ) : state.artifacts.length > 0 ? (
-                  <ul className="w-full space-y-1 px-1">
-                    {state.artifacts.map((a, i) => (
-                      <li key={i} className="text-[11px] text-zinc-300 bg-zinc-800 rounded px-2 py-1 leading-snug">
-                        {a}
-                      </li>
-                    ))}
-                  </ul>
                 ) : (
-                  <Placeholder text="Not yet run" />
+                  <Placeholder text={s === "stage2" ? "Analyzing image…" : "Not yet run"} />
                 )}
               </StageCard>
 

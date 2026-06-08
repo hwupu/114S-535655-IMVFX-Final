@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
             : [];
 
           sessionArtifacts.set(sessionId, detected);
-          send({ stage: 2, status: "done", progress: 100, artifacts: detected });
+          send({ stage: 2, status: "done", progress: 100, artifacts: detected, rawText });
 
           if (!hasArtifacts) {
             send({ stage: "no_artifacts", status: "done" });
