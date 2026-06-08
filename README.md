@@ -297,7 +297,6 @@ The workspace directory is `.gitignore`d. Session files persist across aborts so
 │   │   ├── .python-version             ← 3.10
 │   │   ├── pyproject.toml
 │   │   ├── server.py                   ← FastAPI, port 8003
-│   │   ├── setup.py                    ← optional: pre-download HuggingFace models
 │   │   └── start.sh
 │   │
 │   ├── inpainting/
@@ -477,6 +476,8 @@ Weights are cached in `~/.cache/huggingface/hub/`. To pre-download without runni
 ```bash
 huggingface-cli download timbrooks/instruct-pix2pix
 huggingface-cli download Qwen/Qwen2-VL-2B-Instruct
+huggingface-cli download IDEA-Research/grounding-dino-base
+huggingface-cli download facebook/sam-vit-large
 huggingface-cli download sd2-community/stable-diffusion-2-inpainting
 huggingface-cli download lingcco/fakeVLM
 ```
