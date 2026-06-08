@@ -28,9 +28,6 @@ _sam_model = None
 
 def _unload() -> None:
     global _gdino_processor, _gdino_model, _sam_processor, _sam_model
-    for obj in [_gdino_model, _gdino_processor, _sam_model, _sam_processor]:
-        if obj is not None:
-            del obj
     _gdino_processor = _gdino_model = _sam_processor = _sam_model = None
     flush_memory()
 
@@ -75,7 +72,8 @@ def _run_job(job_id: str, req: InferRequest):
     import numpy as np
     import torch
     from PIL import Image
-
+    gdino_inputs = gdino_outputs = None
+    sam_inputs = sam_outputs = None
     job = _jobs[job_id]
     job["status"] = "running"
     job["progress"] = 10
@@ -145,6 +143,8 @@ def _run_job(job_id: str, req: InferRequest):
         job["status"] = "error"
         job["detail"] = str(exc)
     finally:
+        gdino_inputs = gdino_outputs = None
+        sam_inputs = sam_outputs = None
         _unload()
 
 

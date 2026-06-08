@@ -92,7 +92,8 @@ class JobStatus(BaseModel):
 def _run_job(job_id: str, req: InferRequest):
     import torch
     from PIL import Image
-
+    model = processor = None
+    inputs = output = None
     job = _jobs[job_id]
     job["status"] = "running"
     job["progress"] = 5
@@ -127,6 +128,8 @@ def _run_job(job_id: str, req: InferRequest):
         job["status"] = "error"
         job["detail"] = str(exc)
     finally:
+        model = processor = None
+        inputs = output = None
         _unload()
 
 

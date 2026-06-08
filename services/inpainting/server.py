@@ -56,7 +56,7 @@ class JobStatus(BaseModel):
 
 def _run_job(job_id: str, req: InferRequest):
     from PIL import Image
-
+    pipe = None
     job = _jobs[job_id]
     job["status"] = "running"
     job["progress"] = 5
@@ -92,6 +92,7 @@ def _run_job(job_id: str, req: InferRequest):
         job["status"] = "error"
         job["detail"] = str(exc)
     finally:
+        pipe = None
         _unload()
 
 
