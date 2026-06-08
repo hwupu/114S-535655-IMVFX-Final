@@ -28,6 +28,77 @@ function imageApiUrl(sessionRelPath: string) {
   return `/api/images/${sessionId}/${filename}`;
 }
 
+// ── Per-stage debug card ──────────────────────────────────────────────────────
+
+type CardStatus = "waiting" | "running" | "done" | "error";
+
+function StageCard({
+  num,
+  label,
+  status,
+  progress,
+  children,
+}: {
+  num: number;
+  label: string;
+  status: CardStatus;
+  progress?: number;
+  children: React.ReactNode;
+}) {
+  const badge: Record<CardStatus, string> = {
+    waiting: "text-zinc-600 bg-zinc-800",
+    running: "text-amber-400 bg-amber-950",
+    done:    "text-emerald-400 bg-emerald-950",
+    error:   "text-red-400 bg-red-950",
+  };
+  const label2: Record<CardStatus, string> = {
+    waiting: "waiting",
+    running: progress != null ? `${progress}%` : "running",
+    done:    "done",
+    error:   "error",
+  };
+
+  return (
+    <div className="flex flex-col rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
+        <span className="text-xs font-semibold text-zinc-300">
+          <span className="mr-1.5 text-zinc-600">Stage {num}</span>{label}
+        </span>
+        <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${badge[status]}`}>
+          {label2[status]}
+        </span>
+      </div>
+      {/* Content */}
+      <div className="flex-1 flex items-center justify-center p-2 min-h-32">
+        {children}
+      </div>
+      {/* Running progress bar */}
+      {status === "running" && progress != null && (
+        <div className="h-0.5 w-full bg-zinc-800">
+          <div
+            className="h-full bg-amber-500 transition-all"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ImgOutput({ url, alt }: { url: string; alt: string }) {
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={url} alt={alt} className="max-h-48 w-full object-contain rounded" />
+  );
+}
+
+function Placeholder({ text }: { text?: string }) {
+  return <p className="text-xs text-zinc-700">{text ?? "—"}</p>;
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+
 export default function PipelinePage() {
   const [state, setState] = useState<PipelineState>(INITIAL);
   const [pendingMaskBlob, setPendingMaskBlob] = useState<Blob | null>(null);
@@ -37,7 +108,7 @@ export default function PipelinePage() {
     setState((s) => ({ ...s, ...p }));
   }
 
-  // ── File upload ───────────────────────────────────────────────────────────
+  // ── File upload ─────────────────────────────────────────────────────────────
   async function handleFile(file: File) {
     patch({ stage: "uploading", originalImageUrl: URL.createObjectURL(file) });
     const form = new FormData();
@@ -48,7 +119,7 @@ export default function PipelinePage() {
     patch({ sessionId, stage: "idle" });
   }
 
-  // ── SSE stream helper ─────────────────────────────────────────────────────
+  // ── SSE stream helper ───────────────────────────────────────────────────────
   function openSSE(sessionId: string, prompt: string, fromStage: number, artifacts?: string[]) {
     readerRef.current?.cancel();
 
@@ -71,9 +142,8 @@ export default function PipelinePage() {
         buf = parts.pop() ?? "";
         for (const part of parts) {
           if (!part.startsWith("data: ")) continue;
-          try {
-            handleMsg(JSON.parse(part.slice(6)));
-          } catch { /* skip malformed */ }
+          try { handleMsg(JSON.parse(part.slice(6))); }
+          catch { /* skip malformed */ }
         }
       }
     });
@@ -116,7 +186,7 @@ export default function PipelinePage() {
     });
   }
 
-  // ── Abort ─────────────────────────────────────────────────────────────────
+  // ── Abort ───────────────────────────────────────────────────────────────────
   async function handleAbort() {
     readerRef.current?.cancel();
     if (!state.sessionId) return;
@@ -135,7 +205,7 @@ export default function PipelinePage() {
     });
   }
 
-  // ── Continue after mask review ────────────────────────────────────────────
+  // ── Continue after mask review ──────────────────────────────────────────────
   async function handleContinue() {
     if (!state.sessionId) return;
     if (pendingMaskBlob) {
@@ -147,15 +217,36 @@ export default function PipelinePage() {
     openSSE(state.sessionId, state.prompt, 4, state.artifacts);
   }
 
-  // ── Reset ─────────────────────────────────────────────────────────────────
+  // ── Reset ───────────────────────────────────────────────────────────────────
   const handleReset = useCallback(() => {
     readerRef.current?.cancel();
     setState(INITIAL);
     setPendingMaskBlob(null);
   }, []);
 
-  const isRunning = ["uploading", "stage1", "stage2", "stage3", "stage4"].includes(state.stage);
-  const canStart = !isRunning && state.sessionId && state.prompt && state.stage !== "mask_review";
+  // ── Derived stage card statuses ─────────────────────────────────────────────
+  const s = state.stage;
+  const sp = state.stageProgress;
+
+  const pastStage = (n: number) =>
+    ["stage" + (n + 1), "stage" + (n + 2), "stage" + (n + 3),
+     "mask_review", "no_artifacts", "done"].includes(s);
+
+  const stageStatus = (n: number): CardStatus => {
+    if (s === `stage${n}`) return "running";
+    if (s === "error" && !pastStage(n) && sp[n] != null && sp[n]! > 0) return "error";
+    switch (n) {
+      case 1: return state.stage1OutputUrl ? "done" : "waiting";
+      case 2: return (state.artifacts.length > 0 || s === "no_artifacts" || pastStage(2)) ? "done" : "waiting";
+      case 3: return state.maskUrl ? "done" : "waiting";
+      case 4: return state.resultUrl ? "done" : "waiting";
+      default: return "waiting";
+    }
+  };
+
+  const isRunning = ["uploading", "stage1", "stage2", "stage3", "stage4"].includes(s);
+  const canStart  = !isRunning && state.sessionId && state.prompt && s !== "mask_review";
+  const showStageOutputs = !!state.originalImageUrl;
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100 p-6">
@@ -189,16 +280,16 @@ export default function PipelinePage() {
           <div className="space-y-4">
             <Dropzone
               onFile={handleFile}
-              disabled={isRunning || state.stage === "mask_review"}
+              disabled={isRunning || s === "mask_review"}
               currentImageUrl={state.originalImageUrl}
             />
             <PromptPanel
               value={state.prompt}
               onChange={(v) => patch({ prompt: v })}
-              disabled={isRunning || state.stage === "mask_review"}
+              disabled={isRunning || s === "mask_review"}
             />
             <div className="flex gap-3">
-              {state.stage !== "mask_review" && (
+              {s !== "mask_review" && (
                 <button
                   onClick={() => state.sessionId && openSSE(state.sessionId, state.prompt, 1)}
                   disabled={!canStart}
@@ -225,7 +316,7 @@ export default function PipelinePage() {
 
           {/* Right — status + results */}
           <div className="space-y-4">
-            <PipelineStatus stage={state.stage} stageProgress={state.stageProgress} artifacts={state.artifacts} />
+            <PipelineStatus stage={s} stageProgress={sp} artifacts={state.artifacts} />
             <ResultPanel
               originalUrl={state.originalImageUrl}
               maskUrl={state.maskUrl}
@@ -236,7 +327,7 @@ export default function PipelinePage() {
         </div>
 
         {/* Mask editor (full-width, shown during mask_review) */}
-        {(state.stage === "mask_review") && state.stage1OutputUrl && state.maskUrl && (
+        {s === "mask_review" && state.stage1OutputUrl && state.maskUrl && (
           <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-4 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold">Mask Editor</h3>
@@ -262,6 +353,72 @@ export default function PipelinePage() {
             />
           </div>
         )}
+
+        {/* ── Per-stage debug outputs ── */}
+        {showStageOutputs && (
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold text-zinc-400">Stage Outputs</h3>
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+
+              {/* Stage 1 — InstructPix2Pix */}
+              <StageCard
+                num={1} label="Style Edit"
+                status={stageStatus(1)} progress={sp[1]}
+              >
+                {state.stage1OutputUrl
+                  ? <ImgOutput url={state.stage1OutputUrl} alt="Stage 1 output" />
+                  : <Placeholder text={s === "stage1" ? "Processing…" : "Not yet run"} />}
+              </StageCard>
+
+              {/* Stage 2 — FakeVLM artifact detection */}
+              <StageCard
+                num={2} label="Detection"
+                status={stageStatus(2)} progress={sp[2]}
+              >
+                {s === "stage2" ? (
+                  <Placeholder text="Analyzing image…" />
+                ) : s === "no_artifacts" ? (
+                  <p className="text-xs text-emerald-400 text-center px-2">
+                    ✓ No artifacts detected<br />
+                    <span className="text-zinc-500">Pipeline ended early</span>
+                  </p>
+                ) : state.artifacts.length > 0 ? (
+                  <ul className="w-full space-y-1 px-1">
+                    {state.artifacts.map((a, i) => (
+                      <li key={i} className="text-[11px] text-zinc-300 bg-zinc-800 rounded px-2 py-1 leading-snug">
+                        {a}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <Placeholder text="Not yet run" />
+                )}
+              </StageCard>
+
+              {/* Stage 3 — Grounded-SAM mask */}
+              <StageCard
+                num={3} label="Mask"
+                status={stageStatus(3)} progress={sp[3]}
+              >
+                {state.maskUrl
+                  ? <ImgOutput url={state.maskUrl} alt="Stage 3 mask" />
+                  : <Placeholder text={s === "stage3" ? "Generating mask…" : "Not yet run"} />}
+              </StageCard>
+
+              {/* Stage 4 — SD Inpainting */}
+              <StageCard
+                num={4} label="Inpainting"
+                status={stageStatus(4)} progress={sp[4]}
+              >
+                {state.resultUrl
+                  ? <ImgOutput url={state.resultUrl} alt="Stage 4 result" />
+                  : <Placeholder text={s === "stage4" ? "Inpainting…" : "Not yet run"} />}
+              </StageCard>
+
+            </div>
+          </div>
+        )}
+
       </div>
     </main>
   );
