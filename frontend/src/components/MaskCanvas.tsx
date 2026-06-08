@@ -15,54 +15,61 @@ export default function MaskCanvas({ baseImageUrl, maskUrl, onMaskChange }: Prop
   const [mode, setMode] = useState<"draw" | "erase">("draw");
   const painting = useRef(false);
   const [loaded, setLoaded] = useState(false);
+  // Aspect ratio of the source image — drives container sizing so canvas + overlay always match
+  const [imgAspect, setImgAspect] = useState<number | null>(null);
   const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
-  const [visualBrushR, setVisualBrushR] = useState(20); // CSS-pixel radius for cursor circle
+  const [visualBrushR, setVisualBrushR] = useState(20);
 
-  // Load base image + mask into canvases
   useEffect(() => {
     const canvas = canvasRef.current;
     const overlay = overlayRef.current;
     if (!canvas || !overlay) return;
     setLoaded(false);
+    setImgAspect(null);
 
     const base = new Image();
     base.crossOrigin = "anonymous";
     base.src = baseImageUrl;
     base.onload = () => {
-      canvas.width = base.naturalWidth;
-      canvas.height = base.naturalHeight;
-      overlay.width = base.naturalWidth;
-      overlay.height = base.naturalHeight;
+      const w = base.naturalWidth;
+      const h = base.naturalHeight;
 
-      const ctx = canvas.getContext("2d")!;
-      ctx.drawImage(base, 0, 0);
+      canvas.width = w;
+      canvas.height = h;
+      overlay.width = w;
+      overlay.height = h;
+
+      canvas.getContext("2d")!.drawImage(base, 0, 0);
+
+      // Set aspect ratio before showing the mask so the container is already the right size
+      setImgAspect(w / h);
 
       const maskImg = new Image();
       maskImg.crossOrigin = "anonymous";
       maskImg.src = maskUrl;
       maskImg.onload = () => {
         const mCtx = overlay.getContext("2d")!;
-        mCtx.clearRect(0, 0, overlay.width, overlay.height);
+        mCtx.clearRect(0, 0, w, h);
 
-        // Convert white pixels of the source mask to red on the overlay so they
-        // are visible (white with the old multiply blend mode was invisible).
+        // Convert white pixels of the incoming mask to red on the overlay canvas.
+        // White + multiply blend-mode was invisible; red at 55 % opacity is clearly visible.
         const tmp = document.createElement("canvas");
-        tmp.width = overlay.width;
-        tmp.height = overlay.height;
+        tmp.width = w;
+        tmp.height = h;
         const tCtx = tmp.getContext("2d")!;
-        tCtx.drawImage(maskImg, 0, 0, overlay.width, overlay.height);
-        const src = tCtx.getImageData(0, 0, overlay.width, overlay.height);
-        const dst = mCtx.createImageData(overlay.width, overlay.height);
+        tCtx.drawImage(maskImg, 0, 0, w, h);
+        const src = tCtx.getImageData(0, 0, w, h);
+        const dst = mCtx.createImageData(w, h);
         for (let i = 0; i < src.data.length; i += 4) {
           if (src.data[i + 3] > 0 && src.data[i] > 127) {
-            dst.data[i]     = 255; // R
-            dst.data[i + 1] = 50;  // G
-            dst.data[i + 2] = 50;  // B
-            dst.data[i + 3] = 255; // A
+            dst.data[i]     = 255;
+            dst.data[i + 1] = 50;
+            dst.data[i + 2] = 50;
+            dst.data[i + 3] = 255;
           }
-          // transparent otherwise
         }
         mCtx.putImageData(dst, 0, 0);
+
         setLoaded(true);
         exportMask();
       };
@@ -70,7 +77,7 @@ export default function MaskCanvas({ baseImageUrl, maskUrl, onMaskChange }: Prop
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baseImageUrl, maskUrl]);
 
-  // Export: convert red overlay → binary white/black mask PNG for the inpainting service
+  // Export: red overlay → binary white/black mask PNG expected by the inpainting service
   const exportMask = useCallback(() => {
     const overlay = overlayRef.current;
     if (!overlay) return;
@@ -86,47 +93,41 @@ export default function MaskCanvas({ baseImageUrl, maskUrl, onMaskChange }: Prop
     const dst = tCtx.getImageData(0, 0, tmp.width, tmp.height);
     for (let i = 0; i < src.data.length; i += 4) {
       if (src.data[i + 3] > 0) {
-        dst.data[i]     = 255;
-        dst.data[i + 1] = 255;
-        dst.data[i + 2] = 255;
-        dst.data[i + 3] = 255;
+        dst.data[i] = dst.data[i + 1] = dst.data[i + 2] = dst.data[i + 3] = 255;
       }
-      // else: stays black (already filled)
     }
     tCtx.putImageData(dst, 0, 0);
     tmp.toBlob((blob) => { if (blob) onMaskChange(blob); }, "image/png");
   }, [onMaskChange]);
 
-  const getCanvasPos = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // Convert a CSS-space mouse event on the overlay into canvas pixel coordinates + visual brush radius
+  const canvasCoords = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const scaleX = e.currentTarget.width > 0 ? e.currentTarget.width / rect.width : 1;
     const scaleY = e.currentTarget.height > 0 ? e.currentTarget.height / rect.height : 1;
     return {
       x: (e.clientX - rect.left) * scaleX,
       y: (e.clientY - rect.top) * scaleY,
-      cssRadiusX: brushSize / scaleX, // visual radius in CSS pixels
+      cssX: e.clientX - rect.left,
+      cssY: e.clientY - rect.top,
+      cssR: brushSize / scaleX,
     };
   };
 
-  const updateCursor = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const { cssRadiusX } = getCanvasPos(e);
-    setCursorPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-    setVisualBrushR(cssRadiusX);
-  };
-
   const paint = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    updateCursor(e);
+    const { x, y, cssX, cssY, cssR } = canvasCoords(e);
+    setCursorPos({ x: cssX, y: cssY });
+    setVisualBrushR(cssR);
+
     if (!painting.current || !loaded) return;
     const overlay = overlayRef.current;
     if (!overlay) return;
     const mCtx = overlay.getContext("2d")!;
-    const { x, y } = getCanvasPos(e);
 
     mCtx.beginPath();
     if (mode === "draw") {
       mCtx.globalCompositeOperation = "source-over";
-      mCtx.fillStyle = "rgba(255, 50, 50, 1)"; // solid red — converted to white on export
+      mCtx.fillStyle = "rgba(255, 50, 50, 1)";
     } else {
       mCtx.globalCompositeOperation = "destination-out";
       mCtx.fillStyle = "rgba(0,0,0,1)";
@@ -172,16 +173,30 @@ export default function MaskCanvas({ baseImageUrl, maskUrl, onMaskChange }: Prop
         </label>
       </div>
 
-      {/* Canvas stack */}
+      {/*
+        Canvas container.
+
+        The container is sized by CSS aspect-ratio (set once the image loads) plus
+        maxHeight: 500px. This means:
+          - Landscape image: fills full width, height = width / aspect (≤ 500 px).
+          - Portrait image: height is capped at 500 px, width shrinks to 500 * aspect.
+
+        Both canvases fill the container (w-full h-full / inset-0), so they are
+        always pixel-perfectly aligned regardless of the source image dimensions.
+      */}
       <div
         className="relative overflow-hidden rounded-lg border border-zinc-700"
-        style={{ maxHeight: 500, cursor: "none" }}
+        style={{
+          cursor: "none",
+          aspectRatio: imgAspect !== null ? String(imgAspect) : undefined,
+          maxHeight: 500,
+        }}
         onMouseLeave={() => setCursorPos(null)}
       >
-        {/* Base image */}
-        <canvas ref={canvasRef} className="block w-full" />
+        {/* Base image canvas — pixel buffer = natural size, CSS fills container */}
+        <canvas ref={canvasRef} className="block w-full h-full" />
 
-        {/* Red mask overlay — opacity blends with base image */}
+        {/* Red mask overlay — same container bounds as base canvas */}
         <canvas
           ref={overlayRef}
           className="absolute inset-0 w-full h-full"
@@ -192,7 +207,7 @@ export default function MaskCanvas({ baseImageUrl, maskUrl, onMaskChange }: Prop
           onMouseLeave={() => { stopPainting(); setCursorPos(null); }}
         />
 
-        {/* Brush size cursor circle */}
+        {/* Brush cursor circle */}
         {cursorPos && (
           <div
             className="pointer-events-none absolute rounded-full border border-white"
