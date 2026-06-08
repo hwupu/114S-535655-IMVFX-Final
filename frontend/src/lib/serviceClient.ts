@@ -1,8 +1,8 @@
 const PORTS = {
   instructpix2pix: 8001,
-  artifact_detector: 8002,
+  qwen25vl: 8002,
   grounded_sam: 8003,
-  inpainting: 8004,
+  sd2: 8004,
   fakevlm: 8005,
 } as const;
 

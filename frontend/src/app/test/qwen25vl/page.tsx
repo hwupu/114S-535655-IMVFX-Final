@@ -47,7 +47,7 @@ export default function ArtifactDetectorTestPage() {
     const invokeRes = await fetch("/api/test/invoke", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ service: "artifact_detector", sessionId }),
+      body: JSON.stringify({ service: "qwen25vl", sessionId }),
     });
     if (!invokeRes.ok) {
       const { error: e } = await invokeRes.json();
@@ -89,9 +89,9 @@ export default function ArtifactDetectorTestPage() {
 
   return (
     <TestShell
-      title="Artifact Detector"
+      title="Qwen2.5-VL Detector"
       port={8002}
-      description="Qwen2-VL-2B detects AI-generated visual artifacts in an image"
+      description="Qwen2.5-VL-3B detects AI-generated visual artifacts with bounding boxes"
     >
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Inputs */}

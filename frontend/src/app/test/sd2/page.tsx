@@ -84,7 +84,7 @@ export default function InpaintingTestPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        service: "inpainting",
+        service: "sd2",
         sessionId: imageSessionId,
         maskSessionId: activeMaskSessionId,
         prompt,

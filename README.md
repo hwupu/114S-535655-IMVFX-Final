@@ -99,7 +99,7 @@ These descriptions are passed directly to Stage 3 as text grounding queries for 
 
 The model uses 4-bit NF4 quantization (BitsAndBytes) on CUDA for memory efficiency (~7 GB quantized vs ~28 GB unquantized). On MPS or CPU, quantization is disabled and the model runs in `float32`.
 
-> **Note:** `Qwen/Qwen2-VL-2B-Instruct` (port 8002) remains available as a standalone service for comparison via the `/test/artifact-detector` test page, but is no longer used in the main pipeline.
+> **Note:** The `qwen25vl` service (port 8002) provides standalone testing via the `/test/qwen25vl` test page.
 
 ---
 
@@ -167,7 +167,7 @@ SD2 Inpainting was selected as the best practical starting point: the text guida
 **Model:** `Qwen/Qwen2-VL-2B-Instruct` via HuggingFace `transformers`  
 **Port:** 8002 · Python 3.11
 
-Qwen2-VL-2B is a lightweight VLM (~2 GB) that runs on Apple Silicon (MPS) and NVIDIA GPUs. It was the original Stage 2 detector and remains available as a standalone service for comparison testing via `/test/artifact-detector`. Its structured output format (`{ has_artifacts, artifacts[] }`) differs from FakeVLM's free-text response.
+Qwen2.5-VL-3B is a lightweight VLM that runs on Apple Silicon (MPS) and NVIDIA GPUs. Available as a standalone service for testing via `/test/qwen25vl`. Returns artifact descriptions with bounding boxes in 0–1000 normalized coordinates.
 
 ---
 
@@ -287,7 +287,7 @@ The workspace directory is `.gitignore`d. Session files persist across aborts so
 │   │   ├── server.py                   ← FastAPI, port 8001
 │   │   └── start.sh
 │   │
-│   ├── artifact_detector/
+│   ├── qwen25vl/
 │   │   ├── .python-version             ← 3.11
 │   │   ├── pyproject.toml
 │   │   ├── server.py                   ← FastAPI, port 8002
@@ -299,7 +299,7 @@ The workspace directory is `.gitignore`d. Session files persist across aborts so
 │   │   ├── server.py                   ← FastAPI, port 8003
 │   │   └── start.sh
 │   │
-│   ├── inpainting/
+│   ├── sd2/
 │   │   ├── .python-version             ← 3.10
 │   │   ├── pyproject.toml
 │   │   ├── server.py                   ← FastAPI, port 8004
@@ -323,9 +323,9 @@ The workspace directory is `.gitignore`d. Session files persist across aborts so
     │   │   ├── test/
     │   │   │   ├── instructpix2pix/page.tsx
     │   │   │   ├── fakevlm/page.tsx
-    │   │   │   ├── artifact-detector/page.tsx
+    │   │   │   ├── qwen25vl/page.tsx
     │   │   │   ├── grounded-sam/page.tsx
-    │   │   │   └── inpainting/page.tsx
+    │   │   │   └── sd2/page.tsx
     │   │   └── api/
     │   │       ├── upload/route.ts
     │   │       ├── upload/mask/route.ts
@@ -428,8 +428,8 @@ pnpm install
 
 ```bash
 cd services/instructpix2pix   && uv sync && cd ../..
-cd services/artifact_detector && uv sync && cd ../..
-cd services/inpainting        && uv sync && cd ../..
+cd services/qwen25vl          && uv sync && cd ../..
+cd services/sd2               && uv sync && cd ../..
 cd services/fakeVLM           && uv sync && cd ../..
 cd services/grounded_sam      && uv sync && cd ../..
 ```
@@ -528,9 +528,9 @@ Each model can be tested independently from the landing page at [http://localhos
 |---|---|
 | `/test/instructpix2pix` | Upload image + type prompt → see edited image |
 | `/test/fakevlm` | Upload image → get real/fake verdict text (pipeline Stage 2) |
-| `/test/artifact-detector` | Upload image → see Qwen2-VL artifact list (standalone comparison) |
+| `/test/qwen25vl` | Upload image → see Qwen2.5-VL artifact list with bounding boxes |
 | `/test/grounded-sam` | Upload image + type artifact descriptions → see segmentation mask |
-| `/test/inpainting` | Upload image + mask + type prompt → see inpainted result |
+| `/test/sd2` | Upload image + mask + type prompt → see inpainted result |
 
 These pages are useful for verifying that each service is working correctly before running the full pipeline.
 

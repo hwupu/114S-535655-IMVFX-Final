@@ -138,7 +138,7 @@ export async function POST(req: NextRequest) {
             ? `Naturally repair the following defects in the image: ${artifacts.join(", ")}`
             : "Naturally repair any visual defects in the marked region";
 
-          const { ok } = await runStage(4, "inpainting", {
+          const { ok } = await runStage(4, "sd2", {
             image_path: path.join(sessionDir, "stage1_output.png"),
             mask_path: path.join(sessionDir, "stage3_mask.png"),
             prompt: inpaintPrompt,

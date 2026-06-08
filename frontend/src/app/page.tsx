@@ -20,12 +20,12 @@ const SERVICES = [
     color: "violet",
   },
   {
-    slug: "artifact-detector",
-    name: "Artifact Detector",
+    slug: "qwen25vl",
+    name: "Qwen2.5-VL",
     port: 8002,
-    description: "Qwen2-VL detects AI-generated visual artifacts",
+    description: "Qwen2.5-VL-3B detects AI-generated visual artifacts",
     inputs: "Image",
-    output: "Artifact list",
+    output: "Artifact list + boxes",
     color: "amber",
   },
   {
@@ -38,7 +38,7 @@ const SERVICES = [
     color: "emerald",
   },
   {
-    slug: "inpainting",
+    slug: "sd2",
     name: "SD2 Inpainting",
     port: 8004,
     description: "Text-guided local image repair",
