@@ -1,16 +1,23 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import TestShell from "@/components/TestShell";
 import Dropzone from "@/components/Dropzone";
+import MaskCanvas from "@/components/MaskCanvas";
+
+// 1×1 transparent PNG — used as the blank starting mask for draw mode
+const BLANK_MASK = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVQI12NgAAIABQAABjE+ibYAAAAASUVORK5CYII=";
 
 type Status = "idle" | "uploading-image" | "uploading-mask" | "running" | "done" | "error";
+type MaskMode = "upload" | "draw";
 
 export default function InpaintingTestPage() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageSessionId, setImageSessionId] = useState<string | null>(null);
   const [maskUrl, setMaskUrl] = useState<string | null>(null);
   const [maskSessionId, setMaskSessionId] = useState<string | null>(null);
+  const [maskMode, setMaskMode] = useState<MaskMode>("upload");
+  const [drawnMaskBlob, setDrawnMaskBlob] = useState<Blob | null>(null);
   const [prompt, setPrompt] = useState("fix the artifact, realistic photo");
   const [status, setStatus] = useState<Status>("idle");
   const [progress, setProgress] = useState(0);
@@ -27,6 +34,7 @@ export default function InpaintingTestPage() {
     setStatus("uploading-image");
     setResultUrl(null);
     setError(null);
+    setDrawnMaskBlob(null);
     const form = new FormData();
     form.append("image", file);
     const res = await fetch("/api/upload", { method: "POST", body: form });
@@ -46,8 +54,27 @@ export default function InpaintingTestPage() {
     setStatus("idle");
   };
 
+  const handleMaskChange = useCallback((blob: Blob) => {
+    setDrawnMaskBlob(blob);
+  }, []);
+
   const handleRun = async () => {
-    if (!imageSessionId || !maskSessionId || !prompt.trim()) return;
+    if (!imageSessionId || !prompt.trim()) return;
+
+    let activeMaskSessionId = maskSessionId;
+
+    if (maskMode === "draw") {
+      if (!drawnMaskBlob) return;
+      setStatus("uploading-mask");
+      const form = new FormData();
+      form.append("image", drawnMaskBlob, "mask.png");
+      const res = await fetch("/api/upload", { method: "POST", body: form });
+      const { sessionId: sid } = await res.json();
+      activeMaskSessionId = sid;
+    }
+
+    if (!activeMaskSessionId) return;
+
     setStatus("running");
     setProgress(0);
     setResultUrl(null);
@@ -59,7 +86,7 @@ export default function InpaintingTestPage() {
       body: JSON.stringify({
         service: "inpainting",
         sessionId: imageSessionId,
-        maskSessionId,
+        maskSessionId: activeMaskSessionId,
         prompt,
       }),
     });
@@ -97,6 +124,7 @@ export default function InpaintingTestPage() {
     setImageSessionId(null);
     setMaskUrl(null);
     setMaskSessionId(null);
+    setDrawnMaskBlob(null);
     setResultUrl(null);
     setError(null);
     setProgress(0);
@@ -104,6 +132,11 @@ export default function InpaintingTestPage() {
   };
 
   const busy = status === "uploading-image" || status === "uploading-mask" || status === "running";
+  const canRun =
+    !!imageSessionId &&
+    ((maskMode === "upload" && !!maskSessionId) || (maskMode === "draw" && !!drawnMaskBlob)) &&
+    !busy &&
+    !!prompt.trim();
 
   return (
     <TestShell
@@ -114,19 +147,54 @@ export default function InpaintingTestPage() {
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Inputs */}
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <p className="mb-1.5 text-xs text-zinc-400">Source image</p>
-              <Dropzone onFile={handleImageFile} disabled={busy} currentImageUrl={imageUrl} />
-            </div>
-            <div>
-              <p className="mb-1.5 text-xs text-zinc-400">
-                Mask{" "}
-                <span className="text-zinc-600">(white = inpaint area)</span>
-              </p>
-              <Dropzone onFile={handleMaskFile} disabled={busy} currentImageUrl={maskUrl} />
-            </div>
+          {/* Source image */}
+          <div>
+            <p className="mb-1.5 text-xs text-zinc-400">Source image</p>
+            <Dropzone onFile={handleImageFile} disabled={busy} currentImageUrl={imageUrl} />
           </div>
+
+          {/* Mask mode toggle */}
+          <div>
+            <p className="mb-1.5 text-xs text-zinc-400">Mask</p>
+            <div className="mb-3 flex gap-1 rounded-lg border border-zinc-700 p-1 w-fit">
+              {(["upload", "draw"] as const).map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setMaskMode(m)}
+                  disabled={busy}
+                  className={[
+                    "rounded px-3 py-1 text-xs font-medium capitalize transition-colors",
+                    maskMode === m
+                      ? "bg-rose-600 text-white"
+                      : "text-zinc-400 hover:text-zinc-200",
+                  ].join(" ")}
+                >
+                  {m === "upload" ? "Upload mask" : "Draw mask"}
+                </button>
+              ))}
+            </div>
+
+            {maskMode === "upload" ? (
+              <div>
+                <p className="mb-1.5 text-xs text-zinc-600">White = inpaint area</p>
+                <Dropzone onFile={handleMaskFile} disabled={busy} currentImageUrl={maskUrl} />
+              </div>
+            ) : (
+              imageUrl ? (
+                <MaskCanvas
+                  baseImageUrl={imageUrl}
+                  maskUrl={BLANK_MASK}
+                  onMaskChange={handleMaskChange}
+                />
+              ) : (
+                <div className="flex min-h-32 items-center justify-center rounded-lg border border-dashed border-zinc-700">
+                  <p className="text-xs text-zinc-600">Upload a source image first</p>
+                </div>
+              )
+            )}
+          </div>
+
+          {/* Prompt */}
           <div>
             <label className="mb-1.5 block text-xs text-zinc-400">Inpainting prompt</label>
             <input
@@ -138,13 +206,16 @@ export default function InpaintingTestPage() {
               className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-rose-500 focus:outline-none disabled:opacity-50"
             />
           </div>
+
+          {/* Actions */}
           <div className="flex gap-2">
             <button
               onClick={handleRun}
-              disabled={!imageSessionId || !maskSessionId || busy || !prompt.trim()}
+              disabled={!canRun}
               className="flex-1 rounded-lg bg-rose-600 py-2 text-sm font-medium text-white transition-colors hover:bg-rose-500 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              {status === "running" ? `Inpainting… ${progress}%` : "Inpaint"}
+              {status === "uploading-mask" ? "Uploading mask…" :
+               status === "running" ? `Inpainting… ${progress}%` : "Inpaint"}
             </button>
             {(resultUrl || error) && (
               <button
@@ -155,10 +226,11 @@ export default function InpaintingTestPage() {
               </button>
             )}
           </div>
+
           {!imageSessionId && (
-            <p className="text-xs text-zinc-600">Upload both an image and a mask to continue.</p>
+            <p className="text-xs text-zinc-600">Upload a source image to continue.</p>
           )}
-          {imageSessionId && !maskSessionId && (
+          {imageSessionId && maskMode === "upload" && !maskSessionId && (
             <p className="text-xs text-zinc-600">Upload a mask image to continue.</p>
           )}
           {status === "running" && (
