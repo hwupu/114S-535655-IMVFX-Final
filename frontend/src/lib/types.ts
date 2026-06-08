@@ -19,6 +19,7 @@ export interface PipelineState {
   stage1OutputUrl: string | null;    // /api/images/:session/stage1_output.png
   artifacts: string[];               // VLM descriptions (parsed)
   stage2RawText: string | null;      // raw model response, for debugging
+  stage2Boxes: number[][] | null;    // qwen pipeline: [[x1,y1,x2,y2], ...] 0-1000 range
   maskUrl: string | null;            // /api/images/:session/stage3_mask.png
   resultUrl: string | null;          // /api/images/:session/stage4_result.png
   progress: number;                  // 0-100 for the current running stage
@@ -32,6 +33,7 @@ export interface SSEMessage {
   progress?: number;
   artifacts?: string[];
   rawText?: string;      // stage 2: unprocessed model response
+  boxes?: number[][];   // stage 2 (qwen): bounding boxes [[x1,y1,x2,y2], ...] 0-1000 range
   resultPath?: string;  // session-relative: "{sessionId}/filename"
   maskPath?: string;
   error?: string;

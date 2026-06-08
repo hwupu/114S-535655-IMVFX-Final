@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { PipelineState, SSEMessage } from "@/lib/types";
 import Dropzone from "@/components/Dropzone";
@@ -28,6 +28,41 @@ const INITIAL: PipelineState = {
 function imageApiUrl(sessionRelPath: string) {
   const [sessionId, filename] = sessionRelPath.split("/");
   return `/api/images/${sessionId}/${filename}`;
+}
+
+// ── Bounding box overlay for Stage 2 debug card ───────────────────────────────
+
+const BOX_COLORS = ["#ff5032", "#32b5ff", "#32ff7a", "#ffb432", "#c832ff"];
+
+function BoxOverlay({ imageUrl, boxes }: { imageUrl: string; boxes: number[][] }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const img = new Image();
+    img.onload = () => {
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      ctx.drawImage(img, 0, 0);
+      boxes.forEach(([x1, y1, x2, y2], i) => {
+        const color = BOX_COLORS[i % BOX_COLORS.length];
+        const px = (x1 / 1000) * img.naturalWidth;
+        const py = (y1 / 1000) * img.naturalHeight;
+        const pw = ((x2 - x1) / 1000) * img.naturalWidth;
+        const ph = ((y2 - y1) / 1000) * img.naturalHeight;
+        const lw = Math.max(2, img.naturalWidth / 250);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lw;
+        ctx.strokeRect(px, py, pw, ph);
+      });
+    };
+    img.src = imageUrl;
+  }, [imageUrl, boxes]);
+
+  return <canvas ref={canvasRef} className="max-h-28 max-w-full object-contain rounded" />;
 }
 
 // ── Per-stage debug card ──────────────────────────────────────────────────────
@@ -62,9 +97,7 @@ function StageCard({
 
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden">
-      {/* Horizontal layout: label column + output column */}
       <div className="flex items-stretch gap-0">
-        {/* Left: stage label */}
         <div className="flex flex-col justify-center gap-1 px-4 py-3 border-r border-zinc-800 min-w-36">
           <p className="text-[10px] text-zinc-600 font-medium uppercase tracking-wider">Stage {num}</p>
           <p className="text-sm font-semibold text-zinc-200">{label}</p>
@@ -72,12 +105,10 @@ function StageCard({
             {badgeText[status]}
           </span>
         </div>
-        {/* Right: output */}
         <div className="flex flex-1 items-center justify-start p-3 min-h-28">
           {children}
         </div>
       </div>
-      {/* Running progress bar */}
       {status === "running" && progress != null && (
         <div className="h-0.5 w-full bg-zinc-800">
           <div className="h-full bg-amber-500 transition-all" style={{ width: `${progress}%` }} />
@@ -100,7 +131,7 @@ function Placeholder({ text }: { text?: string }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-export default function PipelinePage() {
+export default function PipelineQwenPage() {
   const [state, setState] = useState<PipelineState>(INITIAL);
   const [pendingMaskBlob, setPendingMaskBlob] = useState<Blob | null>(null);
   const readerRef = useRef<ReadableStreamDefaultReader | null>(null);
@@ -109,7 +140,6 @@ export default function PipelinePage() {
     setState((s) => ({ ...s, ...p }));
   }
 
-  // ── File upload ─────────────────────────────────────────────────────────────
   async function handleFile(file: File) {
     patch({ stage: "uploading", originalImageUrl: URL.createObjectURL(file) });
     const form = new FormData();
@@ -120,11 +150,10 @@ export default function PipelinePage() {
     patch({ sessionId, stage: "idle" });
   }
 
-  // ── SSE stream helper ───────────────────────────────────────────────────────
   function openSSE(sessionId: string, prompt: string, fromStage: number, artifacts?: string[]) {
     readerRef.current?.cancel();
 
-    fetch("/api/pipeline/start", {
+    fetch("/api/pipeline-qwen/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sessionId, prompt, fromStage, artifacts }),
@@ -163,8 +192,9 @@ export default function PipelinePage() {
         if (msg.status === "done") {
           if (msg.stage === 1 && msg.resultPath) next.stage1OutputUrl = imageApiUrl(msg.resultPath);
           if (msg.stage === 2) {
-            if (msg.artifacts)  next.artifacts = msg.artifacts;
-            if (msg.rawText != null) next.stage2RawText = msg.rawText;
+            if (msg.artifacts)        next.artifacts = msg.artifacts;
+            if (msg.rawText != null)  next.stage2RawText = msg.rawText;
+            if (msg.boxes != null)    next.stage2Boxes = msg.boxes;
           }
           if (msg.stage === 3 && msg.maskPath)   next.maskUrl = imageApiUrl(msg.maskPath);
           if (msg.stage === 4 && msg.resultPath) next.resultUrl = imageApiUrl(msg.resultPath);
@@ -190,7 +220,6 @@ export default function PipelinePage() {
     });
   }
 
-  // ── Abort ───────────────────────────────────────────────────────────────────
   async function handleAbort() {
     readerRef.current?.cancel();
     if (!state.sessionId) return;
@@ -209,7 +238,6 @@ export default function PipelinePage() {
     });
   }
 
-  // ── Continue after mask review ──────────────────────────────────────────────
   async function handleContinue() {
     if (!state.sessionId) return;
     if (pendingMaskBlob) {
@@ -221,14 +249,12 @@ export default function PipelinePage() {
     openSSE(state.sessionId, state.prompt, 4, state.artifacts);
   }
 
-  // ── Reset ───────────────────────────────────────────────────────────────────
   const handleReset = useCallback(() => {
     readerRef.current?.cancel();
     setState(INITIAL);
     setPendingMaskBlob(null);
   }, []);
 
-  // ── Derived stage card statuses ─────────────────────────────────────────────
   const s = state.stage;
   const sp = state.stageProgress;
 
@@ -260,7 +286,9 @@ export default function PipelinePage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold">AI Artifact Repair Pipeline</h1>
-            <p className="text-xs text-zinc-500 mt-0.5">InstructPix2Pix → Detection → Mask → Inpainting</p>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              InstructPix2Pix → Qwen2.5-VL → Mask → Inpainting
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <Link
@@ -280,7 +308,6 @@ export default function PipelinePage() {
 
         {/* Main grid */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          {/* Left — input */}
           <div className="space-y-4">
             <Dropzone
               onFile={handleFile}
@@ -297,7 +324,7 @@ export default function PipelinePage() {
                 <button
                   onClick={() => state.sessionId && openSSE(state.sessionId, state.prompt, 1)}
                   disabled={!canStart}
-                  className="flex-1 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  className="flex-1 rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   {isRunning ? "Running…" : "Start"}
                 </button>
@@ -318,7 +345,6 @@ export default function PipelinePage() {
             )}
           </div>
 
-          {/* Right — status + results */}
           <div className="space-y-4">
             <PipelineStatus stage={s} stageProgress={sp} artifacts={state.artifacts} />
             <ResultPanel
@@ -330,7 +356,7 @@ export default function PipelinePage() {
           </div>
         </div>
 
-        {/* Mask editor (full-width, shown during mask_review) */}
+        {/* Mask editor */}
         {s === "mask_review" && state.stage1OutputUrl && state.maskUrl && (
           <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-4 space-y-4">
             <div className="flex items-center justify-between">
@@ -344,7 +370,7 @@ export default function PipelinePage() {
                 </button>
                 <button
                   onClick={handleContinue}
-                  className="rounded-lg bg-indigo-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-indigo-500"
+                  className="rounded-lg bg-amber-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-amber-500"
                 >
                   Continue to Inpainting →
                 </button>
@@ -358,28 +384,23 @@ export default function PipelinePage() {
           </div>
         )}
 
-        {/* ── Per-stage debug outputs ── */}
+        {/* Per-stage debug outputs */}
         {showStageOutputs && (
           <div className="space-y-3">
             <h3 className="text-sm font-semibold text-zinc-400">Stage Outputs</h3>
             <div className="flex flex-col gap-3">
 
-              {/* Stage 1 — InstructPix2Pix */}
-              <StageCard
-                num={1} label="Style Edit"
-                status={stageStatus(1)} progress={sp[1]}
-              >
+              <StageCard num={1} label="Style Edit" status={stageStatus(1)} progress={sp[1]}>
                 {state.stage1OutputUrl
                   ? <ImgOutput url={state.stage1OutputUrl} alt="Stage 1 output" />
                   : <Placeholder text={s === "stage1" ? "Processing…" : "Not yet run"} />}
               </StageCard>
 
-              {/* Stage 2 — FakeVLM artifact detection */}
-              <StageCard
-                num={2} label="Detection"
-                status={stageStatus(2)} progress={sp[2]}
-              >
-                {state.stage2RawText != null ? (
+              {/* Stage 2 — Qwen2.5-VL: show box overlay if boxes available, else raw text */}
+              <StageCard num={2} label="Qwen2.5-VL" status={stageStatus(2)} progress={sp[2]}>
+                {state.stage2Boxes && state.stage2Boxes.length > 0 && state.stage1OutputUrl ? (
+                  <BoxOverlay imageUrl={state.stage1OutputUrl} boxes={state.stage2Boxes} />
+                ) : state.stage2RawText != null ? (
                   <p className="text-[11px] text-zinc-300 leading-relaxed whitespace-pre-wrap break-words max-w-full">
                     {state.stage2RawText || <span className="text-zinc-600">(empty response)</span>}
                   </p>
@@ -388,21 +409,13 @@ export default function PipelinePage() {
                 )}
               </StageCard>
 
-              {/* Stage 3 — Grounded-SAM mask */}
-              <StageCard
-                num={3} label="Mask"
-                status={stageStatus(3)} progress={sp[3]}
-              >
+              <StageCard num={3} label="Mask" status={stageStatus(3)} progress={sp[3]}>
                 {state.maskUrl
                   ? <ImgOutput url={state.maskUrl} alt="Stage 3 mask" />
                   : <Placeholder text={s === "stage3" ? "Generating mask…" : "Not yet run"} />}
               </StageCard>
 
-              {/* Stage 4 — SD Inpainting */}
-              <StageCard
-                num={4} label="Inpainting"
-                status={stageStatus(4)} progress={sp[4]}
-              >
+              <StageCard num={4} label="Inpainting" status={stageStatus(4)} progress={sp[4]}>
                 {state.resultUrl
                   ? <ImgOutput url={state.resultUrl} alt="Stage 4 result" />
                   : <Placeholder text={s === "stage4" ? "Inpainting…" : "Not yet run"} />}

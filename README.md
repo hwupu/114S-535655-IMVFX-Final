@@ -162,12 +162,21 @@ SD2 Inpainting was selected as the best practical starting point: the text guida
 
 ---
 
-### Standalone Service — Qwen2-VL Artifact Detector (Port 8002)
+### Qwen2.5-VL Artifact Detector (Port 8002)
 
-**Model:** `Qwen/Qwen2-VL-2B-Instruct` via HuggingFace `transformers`  
+**Model:** `Qwen/Qwen2.5-VL-3B-Instruct` via HuggingFace `transformers>=4.49`  
 **Port:** 8002 · Python 3.11
 
-Qwen2.5-VL-3B is a lightweight VLM that runs on Apple Silicon (MPS) and NVIDIA GPUs. Available as a standalone service for testing via `/test/qwen25vl`. Returns artifact descriptions with bounding boxes in 0–1000 normalized coordinates.
+Qwen2.5-VL-3B is a lightweight vision-language model that runs on NVIDIA GPUs (4-bit NF4 quantization, ~2 GB VRAM) or Apple Silicon (float32). In addition to the main Qwen pipeline (`/pipeline-qwen`), it is available as a standalone test service at `/test/qwen25vl`.
+
+The model is prompted with a structured format that asks it to output artifact descriptions alongside bounding boxes in 0–1000 normalized coordinates:
+
+```
+ARTIFACT: six fingers on right hand BOX: (320,450),(580,720)
+ARTIFACT: deformed left eye BOX: (210,180),(290,240)
+```
+
+The parsed result includes `raw_text` (full model response), `artifacts` (list of descriptions), `boxes` (parallel list of `[x1,y1,x2,y2]`), and `has_artifacts` (boolean). The test page renders an annotated overlay showing each artifact region numbered and color-coded.
 
 ---
 
@@ -208,7 +217,7 @@ Each service also exposes a `POST /release` endpoint for explicit orchestrator-t
 
 ### Microservice design
 
-Each model runs as an independent FastAPI server in its own `uv`-managed Python environment. This solves a real dependency conflict problem: InstructPix2Pix and SD Inpainting share `diffusers` but at potentially different version requirements; Grounded-SAM uses pure-Python HuggingFace transformers models (no compilation); Qwen2-VL and FakeVLM require Python 3.11 and specific quantization libraries.
+Each model runs as an independent FastAPI server in its own `uv`-managed Python environment. This solves a real dependency conflict problem: InstructPix2Pix and SD Inpainting share `diffusers` but at potentially different version requirements; Grounded-SAM uses pure-Python HuggingFace transformers models (no compilation); Qwen2.5-VL and FakeVLM require Python 3.11 and specific quantization libraries.
 
 Every service exposes the same REST API shape:
 
@@ -227,10 +236,10 @@ Jobs run in background threads so the FastAPI server stays responsive for status
 | Service | Port | Model |
 |---|---|---|
 | InstructPix2Pix | 8001 | timbrooks/instruct-pix2pix |
-| Qwen2-VL Detector *(standalone)* | 8002 | Qwen/Qwen2-VL-2B-Instruct |
+| Qwen2.5-VL *(Stage 2 — Qwen pipeline)* | 8002 | Qwen/Qwen2.5-VL-3B-Instruct |
 | Grounded-SAM | 8003 | grounding-dino-base + sam-vit-large |
 | SD Inpainting | 8004 | sd2-community/stable-diffusion-2-inpainting |
-| FakeVLM *(Stage 2 — pipeline)* | 8005 | lingcco/fakeVLM |
+| FakeVLM *(Stage 2 — FakeVLM pipeline)* | 8005 | lingcco/fakeVLM |
 | Next.js frontend | 3000 | — |
 
 ### Next.js frontend
@@ -238,7 +247,8 @@ Jobs run in background threads so the FastAPI server stays responsive for status
 The frontend is a single-page React app (Next.js 16, App Router, TypeScript, Tailwind CSS). It acts as the central controller for the pipeline:
 
 - **`/api/upload`** — saves uploaded images to `workspace/{sessionId}/original.png`
-- **`/api/pipeline/start`** — SSE endpoint that orchestrates all service calls sequentially, streaming stage progress to the browser. The pipeline pauses and closes the stream at the mask review step; the user's "Continue" click opens a new SSE connection starting at Stage 4.
+- **`/api/pipeline/start`** — SSE orchestrator for the FakeVLM pipeline (Stage 2 = FakeVLM). Streams stage progress to the browser, pauses at mask review, resumes at Stage 4.
+- **`/api/pipeline-qwen/start`** — SSE orchestrator for the Qwen2.5-VL pipeline (Stage 2 = Qwen2.5-VL). Same flow but Stage 2 returns bounding boxes streamed to the client alongside artifact descriptions.
 - **`/api/pipeline/abort`** — sets an in-memory abort flag for the session and calls `DELETE /jobs/{id}` on the currently active service
 - **`/api/images/{sessionId}/{filename}`** — serves workspace images to the browser
 - **`/api/upload/mask`** — saves the user-edited mask blob back to the workspace before Stage 4
@@ -319,7 +329,9 @@ The workspace directory is `.gitignore`d. Session files persist across aborts so
     │   │   ├── page.tsx                ← landing page (pipeline card + service cards)
     │   │   ├── layout.tsx
     │   │   ├── pipeline/
-    │   │   │   └── page.tsx            ← full pipeline UI
+    │   │   │   └── page.tsx            ← FakeVLM pipeline UI
+    │   │   ├── pipeline-qwen/
+    │   │   │   └── page.tsx            ← Qwen2.5-VL pipeline UI
     │   │   ├── test/
     │   │   │   ├── instructpix2pix/page.tsx
     │   │   │   ├── fakevlm/page.tsx
@@ -329,7 +341,8 @@ The workspace directory is `.gitignore`d. Session files persist across aborts so
     │   │   └── api/
     │   │       ├── upload/route.ts
     │   │       ├── upload/mask/route.ts
-    │   │       ├── pipeline/start/route.ts   ← SSE orchestrator
+    │   │       ├── pipeline/start/route.ts        ← SSE orchestrator (FakeVLM)
+    │   │       ├── pipeline-qwen/start/route.ts   ← SSE orchestrator (Qwen2.5-VL)
     │   │       ├── pipeline/abort/route.ts
     │   │       ├── images/[sessionId]/[filename]/route.ts
     │   │       ├── test/invoke/route.ts      ← test-page job submission proxy
@@ -441,7 +454,7 @@ The remaining models are downloaded automatically from HuggingFace the first tim
 | Service | Model | Approx. Size |
 |---|---|---|
 | InstructPix2Pix | timbrooks/instruct-pix2pix | ~8 GB |
-| Artifact Detector | Qwen/Qwen2-VL-2B-Instruct | ~5 GB |
+| Qwen2.5-VL | Qwen/Qwen2.5-VL-3B-Instruct | ~6 GB |
 | Grounded-SAM | IDEA-Research/grounding-dino-base | ~700 MB |
 | Grounded-SAM | facebook/sam-vit-large | ~600 MB |
 | SD Inpainting | sd2-community/stable-diffusion-2-inpainting | ~5 GB |
@@ -451,7 +464,7 @@ Weights are cached in `~/.cache/huggingface/hub/`. To pre-download without runni
 
 ```bash
 huggingface-cli download timbrooks/instruct-pix2pix
-huggingface-cli download Qwen/Qwen2-VL-2B-Instruct
+huggingface-cli download Qwen/Qwen2.5-VL-3B-Instruct
 huggingface-cli download IDEA-Research/grounding-dino-base
 huggingface-cli download facebook/sam-vit-large
 huggingface-cli download sd2-community/stable-diffusion-2-inpainting
@@ -504,17 +517,23 @@ curl http://localhost:8005/health   # FakeVLM (Stage 2 — pipeline)
 
 ## Usage
 
-### Main pipeline
+### Pipelines
 
-Navigate to [http://localhost:3000](http://localhost:3000) and click **Main Pipeline**, or go directly to [http://localhost:3000/pipeline](http://localhost:3000/pipeline).
+Two complete pipelines are available from the landing page. Both share Stages 1, 3, and 4; only Stage 2 differs.
+
+**FakeVLM Pipeline** (`/pipeline`): Stage 2 uses FakeVLM (LLaVA-based) to produce a plain-text list of artifact descriptions.
+
+**Qwen2.5-VL Pipeline** (`/pipeline-qwen`): Stage 2 uses Qwen2.5-VL-3B to produce artifact descriptions along with bounding boxes. The Stage 2 debug card shows an annotated image overlay; bounding boxes are passed to Grounded-SAM as additional spatial hints.
+
+**To run either pipeline:**
 
 1. **Drop an image** onto the upload area, or click to browse.
 2. **Choose or type an instruction** — e.g., "make it look like a painting".
 3. **Click Start.** The interface shows live stage progress:
    - Stage 1 runs InstructPix2Pix on your image.
-   - Stage 2 analyzes the result with FakeVLM. If no artifacts are found, the pipeline completes here.
+   - Stage 2 analyzes the result. If no artifacts are found, the pipeline completes here.
    - Stage 3 generates a pixel mask over the detected artifact regions.
-4. **Review the mask.** Optionally paint corrections with the circular brush (draw to add, erase to remove). Click **Continue to Inpainting**.
+4. **Review the mask.** Optionally paint corrections with the circular brush. Click **Continue to Inpainting**.
 5. Stage 4 fills the masked region with SD Inpainting, guided by the artifact descriptions.
 6. The **Results** panel shows the original image, the mask, and the repaired result side by side.
 
@@ -556,7 +575,7 @@ Content-Type: application/json
 }
 ```
 
-**Artifact Detector (8002)**
+**Qwen2.5-VL Detector (8002)**
 ```json
 {
   "image_path": "/abs/path/workspace/{sessionId}/stage1_output.png",
@@ -565,7 +584,12 @@ Content-Type: application/json
 ```
 Response `result`:
 ```json
-{ "has_artifacts": true, "artifacts": ["six fingers on right hand", "deformed left eye"] }
+{
+  "raw_text": "ARTIFACT: six fingers on right hand BOX: (320,450),(580,720)\n...",
+  "has_artifacts": true,
+  "artifacts": ["six fingers on right hand", "deformed left eye"],
+  "boxes": [[320, 450, 580, 720], [210, 180, 290, 240]]
+}
 ```
 
 **Grounded-SAM (8003)**

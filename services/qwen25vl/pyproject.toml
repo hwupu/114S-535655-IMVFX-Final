@@ -5,7 +5,8 @@ requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.111",
     "uvicorn[standard]>=0.29",
-    "transformers>=4.45,<4.48",
+    "transformers>=4.49",
+    "bitsandbytes>=0.43",
     "accelerate>=0.29",
     "torch>=2.2",
     "torchvision>=0.17",

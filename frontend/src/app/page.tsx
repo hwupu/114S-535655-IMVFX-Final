@@ -77,31 +77,58 @@ export default function HomePage() {
           </p>
         </div>
 
-        {/* Main pipeline — featured card */}
-        <Link
-          href="/pipeline"
-          className="group flex items-center justify-between rounded-xl border border-indigo-600/60 bg-indigo-950/40 p-6 transition-all hover:border-indigo-400 hover:bg-indigo-950/60"
-        >
-          <div className="space-y-1">
-            <div className="flex items-center gap-3">
-              <span className="text-lg font-semibold text-indigo-100 group-hover:text-white">
-                Main Pipeline
-              </span>
-              <span className="rounded-full bg-indigo-800/60 px-2.5 py-0.5 text-xs text-indigo-300">
-                Full pipeline
-              </span>
+        {/* Pipeline cards */}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Link
+            href="/pipeline"
+            className="group flex items-center justify-between rounded-xl border border-indigo-600/60 bg-indigo-950/40 p-6 transition-all hover:border-indigo-400 hover:bg-indigo-950/60"
+          >
+            <div className="space-y-1">
+              <div className="flex items-center gap-3">
+                <span className="text-lg font-semibold text-indigo-100 group-hover:text-white">
+                  FakeVLM Pipeline
+                </span>
+                <span className="rounded-full bg-indigo-800/60 px-2.5 py-0.5 text-xs text-indigo-300">
+                  Full pipeline
+                </span>
+              </div>
+              <p className="text-sm text-indigo-300/70">
+                InstructPix2Pix → FakeVLM → Grounded-SAM → SD2
+              </p>
+              <p className="text-xs text-zinc-500">
+                Stage 2 uses FakeVLM (LLaVA-based text detection)
+              </p>
             </div>
-            <p className="text-sm text-indigo-300/70">
-              InstructPix2Pix → FakeVLM detection → Grounded-SAM mask → SD2 Inpainting
-            </p>
-            <p className="text-xs text-zinc-500">
-              Upload an image + instruction to run the complete artifact repair chain
-            </p>
-          </div>
-          <span className="ml-6 shrink-0 text-xl text-indigo-600 transition-colors group-hover:text-indigo-300">
-            →
-          </span>
-        </Link>
+            <span className="ml-4 shrink-0 text-xl text-indigo-600 transition-colors group-hover:text-indigo-300">
+              →
+            </span>
+          </Link>
+
+          <Link
+            href="/pipeline-qwen"
+            className="group flex items-center justify-between rounded-xl border border-amber-600/60 bg-amber-950/40 p-6 transition-all hover:border-amber-400 hover:bg-amber-950/60"
+          >
+            <div className="space-y-1">
+              <div className="flex items-center gap-3">
+                <span className="text-lg font-semibold text-amber-100 group-hover:text-white">
+                  Qwen2.5-VL Pipeline
+                </span>
+                <span className="rounded-full bg-amber-800/60 px-2.5 py-0.5 text-xs text-amber-300">
+                  Full pipeline
+                </span>
+              </div>
+              <p className="text-sm text-amber-300/70">
+                InstructPix2Pix → Qwen2.5-VL → Grounded-SAM → SD2
+              </p>
+              <p className="text-xs text-zinc-500">
+                Stage 2 uses Qwen2.5-VL-3B with bounding box output
+              </p>
+            </div>
+            <span className="ml-4 shrink-0 text-xl text-amber-600 transition-colors group-hover:text-amber-300">
+              →
+            </span>
+          </Link>
+        </div>
 
         {/* Service test pages */}
         <div>
