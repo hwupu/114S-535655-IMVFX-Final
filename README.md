@@ -375,7 +375,6 @@ Restart your terminal, then:
 ```powershell
 nvm install lts
 nvm use lts
-corepack enable
 ```
 
 **Step 2 — uv**
@@ -384,19 +383,7 @@ corepack enable
 winget install astral-sh.uv
 ```
 
-Or via PowerShell directly:
-
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
-Restart your terminal so `uv` is on `PATH`.
-
-**Step 3 — CUDA Toolkit** *(NVIDIA GPU only)*
-
-Download and install CUDA Toolkit 12.1 from the NVIDIA website. Verify with `nvcc --version` after installation.
-
-**Step 4 — Clone the repo, then switch to Git Bash**
+**Step 3 — Clone the repo, then switch to Git Bash**
 
 ```powershell
 git clone <repo-url>
@@ -440,25 +427,14 @@ pnpm install
 **On macOS (Apple Silicon):** uv falls back to the standard PyPI torch with MPS support.
 
 ```bash
-cd services/instructpix2pix  && uv sync && cd ../..
+cd services/instructpix2pix   && uv sync && cd ../..
 cd services/artifact_detector && uv sync && cd ../..
 cd services/inpainting        && uv sync && cd ../..
 cd services/fakeVLM           && uv sync && cd ../..
+cd services/grounded_sam      && uv sync && cd ../..
 ```
 
-### 3. Install Grounded-SAM dependencies
-
-```bash
-cd services/grounded_sam && uv sync && cd ../..
-```
-
-Models (`grounding-dino-base`, `sam-vit-large`) are downloaded from HuggingFace automatically on first request. To pre-download them before running:
-
-```bash
-cd services/grounded_sam && uv run python setup.py && cd ../..
-```
-
-### 4. Model weights (auto-downloaded on first run)
+### 3. Model weights (auto-downloaded on first run)
 
 The remaining models are downloaded automatically from HuggingFace the first time each service handles a request:
 
