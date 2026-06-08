@@ -356,6 +356,72 @@ The workspace directory is `.gitignore`d. Session files persist across aborts so
 
 ## Setup
 
+### Windows (first-time setup)
+
+> Shell commands in later steps (`bash scripts/...`, `uv sync`) require a bash-compatible terminal. Git for Windows includes **Git Bash**, which is sufficient. WSL provides a full Linux environment if you prefer.
+
+**Step 1 — System tools** (PowerShell or Windows Terminal, run as Administrator):
+
+```powershell
+# Git for Windows (includes Git Bash)
+winget install Git.Git
+
+# Ubuntu WSL — optional; enables running bash scripts natively in Linux
+wsl --install
+
+# NVM for Windows — manages Node.js versions
+winget install CoreyButler.NVMforWindows
+```
+
+Restart your terminal, then:
+
+```powershell
+nvm install lts
+nvm use lts
+corepack enable
+```
+
+**Step 2 — uv**
+
+```powershell
+winget install astral-sh.uv
+```
+
+Or via PowerShell directly:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+Restart your terminal so `uv` is on `PATH`.
+
+**Step 3 — CUDA Toolkit** *(NVIDIA GPU only)*
+
+Download and install CUDA Toolkit 12.1 from the NVIDIA website. Verify with `nvcc --version` after installation.
+
+**Step 4 — C++ Build Tools** *(required for Grounded-SAM)*
+
+Grounded-SAM compiles C++ extensions. Install Visual Studio Build Tools with the **"Desktop development with C++"** workload:
+
+```powershell
+winget install Microsoft.VisualStudio.2022.BuildTools
+```
+
+When the installer opens, select the **Desktop development with C++** workload. Alternatively, download the installer from the Visual C++ Build Tools page at microsoft.com.
+
+**Step 5 — Clone the repo, then switch to Git Bash**
+
+```powershell
+git clone <repo-url>
+cd 114S-535655-IMVFX-Final
+```
+
+Open **Git Bash** (or a WSL terminal) in the repo root. All remaining commands in this Setup section should be run in Git Bash or WSL — not PowerShell.
+
+> **WSL users:** If you are working entirely inside WSL, install `uv`, `nvm`, `node`, and `corepack` inside the WSL terminal separately using the Linux instructions, then continue with the shared steps below.
+
+---
+
 ### Prerequisites
 
 - [uv](https://docs.astral.sh/uv/) — Python package and environment manager
