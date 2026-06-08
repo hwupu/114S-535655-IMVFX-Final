@@ -49,7 +49,7 @@ User photo + instruction
             ▼
 ┌───────────────────────┐
 │  Stage 4              │  Stable Diffusion 2 Inpainting
-│  Local Inpainting     │  stabilityai/stable-diffusion-2-inpainting
+│  Local Inpainting     │  sd2-community/stable-diffusion-2-inpainting
 └───────────┬───────────┘
             │
             ▼
@@ -140,7 +140,7 @@ This step exists because automatic mask generation is imperfect — the VLM migh
 
 ### Stage 4 — Local Inpainting (Stable Diffusion 2 Inpainting)
 
-**Model:** `stabilityai/stable-diffusion-2-inpainting` via HuggingFace `diffusers`  
+**Model:** `sd2-community/stable-diffusion-2-inpainting` via HuggingFace `diffusers`  
 **Port:** 8004 · Python 3.10
 
 The inpainting model receives:
@@ -231,7 +231,7 @@ Jobs run in background threads so the FastAPI server stays responsive for status
 | InstructPix2Pix | 8001 | timbrooks/instruct-pix2pix |
 | Qwen2-VL Detector *(standalone)* | 8002 | Qwen/Qwen2-VL-2B-Instruct |
 | Grounded-SAM | 8003 | GroundingDINO + SAM 2 |
-| SD Inpainting | 8004 | stabilityai/stable-diffusion-2-inpainting |
+| SD Inpainting | 8004 | sd2-community/stable-diffusion-2-inpainting |
 | FakeVLM *(Stage 2 — pipeline)* | 8005 | lingcco/fakeVLM |
 | Next.js frontend | 3000 | — |
 
@@ -479,7 +479,7 @@ The remaining models are downloaded automatically from HuggingFace the first tim
 |---|---|---|
 | InstructPix2Pix | timbrooks/instruct-pix2pix | ~8 GB |
 | Artifact Detector | Qwen/Qwen2-VL-2B-Instruct | ~5 GB |
-| SD Inpainting | stabilityai/stable-diffusion-2-inpainting | ~5 GB |
+| SD Inpainting | sd2-community/stable-diffusion-2-inpainting | ~5 GB |
 | FakeVLM | lingcco/fakeVLM | ~7 GB |
 
 Weights are cached in `~/.cache/huggingface/hub/`. To pre-download without running the pipeline:
@@ -487,7 +487,7 @@ Weights are cached in `~/.cache/huggingface/hub/`. To pre-download without runni
 ```bash
 huggingface-cli download timbrooks/instruct-pix2pix
 huggingface-cli download Qwen/Qwen2-VL-2B-Instruct
-huggingface-cli download stabilityai/stable-diffusion-2-inpainting
+huggingface-cli download sd2-community/stable-diffusion-2-inpainting
 huggingface-cli download lingcco/fakeVLM
 ```
 
@@ -710,7 +710,7 @@ POST /release
 | **Grounding DINO** | Liu et al., 2023 | [arxiv.org/abs/2303.05499](https://arxiv.org/abs/2303.05499) · [GitHub](https://github.com/IDEA-Research/GroundingDINO) |
 | **SAM 2** (Segment Anything Model 2) | Ravi et al., Meta AI, 2024 | [arxiv.org/abs/2408.00714](https://arxiv.org/abs/2408.00714) · [GitHub](https://github.com/facebookresearch/sam2) |
 | **Grounded-SAM 2** (integration) | IDEA-Research | [GitHub](https://github.com/IDEA-Research/Grounded-SAM-2) |
-| **Stable Diffusion 2 Inpainting** | Rombach et al. / Stability AI, 2022 | [arxiv.org/abs/2112.10752](https://arxiv.org/abs/2112.10752) · [HuggingFace](https://huggingface.co/stabilityai/stable-diffusion-2-inpainting) |
+| **Stable Diffusion 2 Inpainting** | Rombach et al. / Stability AI, 2022 | [arxiv.org/abs/2112.10752](https://arxiv.org/abs/2112.10752) · [HuggingFace](https://huggingface.co/sd2-community/stable-diffusion-2-inpainting) *(community mirror — original weights, Stability AI removed the official repo)* |
 | **FakeVLM** — "Spot the Fake" | Wen, Siwei et al., NeurIPS 2025 | Wen, S. et al. "Spot the fake: Large multimodal model-based synthetic image detection with artifact explanation." *Advances in Neural Information Processing Systems* 38 (2026): 58972–59005. · [HuggingFace](https://huggingface.co/lingcco/fakeVLM) |
 | **LLaVA** (FakeVLM base architecture) | Liu et al., 2023 | [arxiv.org/abs/2304.08485](https://arxiv.org/abs/2304.08485) |
 
