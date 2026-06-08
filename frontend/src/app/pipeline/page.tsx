@@ -51,7 +51,7 @@ function StageCard({
     done:    "text-emerald-400 bg-emerald-950",
     error:   "text-red-400 bg-red-950",
   };
-  const label2: Record<CardStatus, string> = {
+  const badgeText: Record<CardStatus, string> = {
     waiting: "waiting",
     running: progress != null ? `${progress}%` : "running",
     done:    "done",
@@ -59,27 +59,26 @@ function StageCard({
   };
 
   return (
-    <div className="flex flex-col rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800">
-        <span className="text-xs font-semibold text-zinc-300">
-          <span className="mr-1.5 text-zinc-600">Stage {num}</span>{label}
-        </span>
-        <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${badge[status]}`}>
-          {label2[status]}
-        </span>
-      </div>
-      {/* Content */}
-      <div className="flex-1 flex items-center justify-center p-2 min-h-32">
-        {children}
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900 overflow-hidden">
+      {/* Horizontal layout: label column + output column */}
+      <div className="flex items-stretch gap-0">
+        {/* Left: stage label */}
+        <div className="flex flex-col justify-center gap-1 px-4 py-3 border-r border-zinc-800 min-w-36">
+          <p className="text-[10px] text-zinc-600 font-medium uppercase tracking-wider">Stage {num}</p>
+          <p className="text-sm font-semibold text-zinc-200">{label}</p>
+          <span className={`mt-1 self-start rounded-full px-2 py-0.5 text-[10px] font-medium ${badge[status]}`}>
+            {badgeText[status]}
+          </span>
+        </div>
+        {/* Right: output */}
+        <div className="flex flex-1 items-center justify-start p-3 min-h-28">
+          {children}
+        </div>
       </div>
       {/* Running progress bar */}
       {status === "running" && progress != null && (
         <div className="h-0.5 w-full bg-zinc-800">
-          <div
-            className="h-full bg-amber-500 transition-all"
-            style={{ width: `${progress}%` }}
-          />
+          <div className="h-full bg-amber-500 transition-all" style={{ width: `${progress}%` }} />
         </div>
       )}
     </div>
@@ -89,7 +88,7 @@ function StageCard({
 function ImgOutput({ url, alt }: { url: string; alt: string }) {
   return (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={url} alt={alt} className="max-h-48 w-full object-contain rounded" />
+    <img src={url} alt={alt} className="max-h-28 max-w-full object-contain rounded" />
   );
 }
 
@@ -358,7 +357,7 @@ export default function PipelinePage() {
         {showStageOutputs && (
           <div className="space-y-3">
             <h3 className="text-sm font-semibold text-zinc-400">Stage Outputs</h3>
-            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <div className="flex flex-col gap-3">
 
               {/* Stage 1 — InstructPix2Pix */}
               <StageCard

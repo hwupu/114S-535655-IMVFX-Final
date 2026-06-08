@@ -65,17 +65,20 @@ def _run_job(job_id: str, req: InferRequest):
         job["progress"] = 20
 
         image = Image.open(req.image_path).convert("RGB")
+        orig_size = image.size  # (W, H) — restore to this after inference
+        image_r = image.resize((512, 512), Image.LANCZOS)
         job["progress"] = 30
 
         result = pipe(
             req.prompt,
-            image=image,
+            image=image_r,
             num_inference_steps=50,
             image_guidance_scale=1.5,
             guidance_scale=7.5,
         ).images[0]
         job["progress"] = 90
 
+        result = result.resize(orig_size, Image.LANCZOS)
         out_path = str(Path(req.image_path).parent / "stage1_output.png")
         result.save(out_path)
         job["progress"] = 100
