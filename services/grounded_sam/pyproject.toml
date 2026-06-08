@@ -7,11 +7,10 @@ dependencies = [
     "uvicorn[standard]>=0.29",
     "torch>=2.2",
     "torchvision>=0.17",
+    # GroundingDINO (transformers 4.44+) + SAM 1 — pure Python, no C++ compilation
+    "transformers>=4.44,<4.48",
     "pillow>=10.0",
-    "supervision>=0.19",
     "numpy>=1.26",
-    "opencv-python-headless>=4.9",
-    # sam2 and groundingdino installed from source — see README
 ]
 
 # On Linux/Windows: install CUDA 12.1 wheels from pytorch.org

@@ -37,8 +37,8 @@ User photo + instruction
             │ artifact descriptions (text)
             ▼
 ┌───────────────────────┐
-│  Stage 3              │  Grounded-SAM 2
-│  Mask Generation      │  Grounding DINO + SAM 2
+│  Stage 3              │  Grounded-SAM
+│  Mask Generation      │  Grounding DINO + SAM
 └───────────┬───────────┘
             │  binary mask PNG
             ▼
@@ -103,9 +103,9 @@ The model uses 4-bit NF4 quantization (BitsAndBytes) on CUDA for memory efficien
 
 ---
 
-### Stage 3 — Mask Generation (Grounded-SAM 2)
+### Stage 3 — Mask Generation (Grounded-SAM)
 
-**Models:** Grounding DINO + SAM 2 (Meta, IDEA-Research)  
+**Models:** `IDEA-Research/grounding-dino-base` + `facebook/sam-vit-large` via HuggingFace `transformers`  
 **Port:** 8003 · Python 3.10
 
 Given the artifact descriptions produced by Stage 2, this stage generates a precise pixel mask of the affected regions.
@@ -114,15 +114,13 @@ Given the artifact descriptions produced by Stage 2, this stage generates a prec
 
 1. **Grounding DINO** takes the natural-language artifact descriptions as a text prompt and predicts bounding boxes around the described regions in the image. It uses an open-vocabulary detection model that maps free-form text to image regions.
 
-2. **SAM 2** (Segment Anything Model 2) takes those bounding boxes as prompts and produces high-quality segmentation masks for each detected region.
+2. **SAM** (Segment Anything Model) takes those bounding boxes as prompts and produces high-quality segmentation masks for each detected region.
 
 3. All per-artifact masks are merged into a single binary mask where white pixels indicate regions to be inpainted.
 
 This approach was chosen over simpler alternatives (e.g., a fixed bounding-box crop) because the segmentation mask accurately follows irregular region boundaries — the edge of a hand, the boundary of a face — giving the inpainting model clean, precise context.
 
-**Checkpoints** (downloaded by `services/grounded_sam/setup.py`):
-- `groundingdino_swint_ogc.pth` — Grounding DINO SwinT backbone
-- `sam2_hiera_large.pt` — SAM 2 Large
+Both models are loaded via HuggingFace `transformers` (pure Python, no C++ compilation required). Weights are downloaded automatically from HuggingFace Hub on first use.
 
 ---
 
@@ -210,7 +208,7 @@ Each service also exposes a `POST /release` endpoint for explicit orchestrator-t
 
 ### Microservice design
 
-Each model runs as an independent FastAPI server in its own `uv`-managed Python environment. This solves a real dependency conflict problem: InstructPix2Pix and SD Inpainting share `diffusers` but at potentially different version requirements; Grounded-SAM 2 requires compiled C++ extensions from source; Qwen2-VL and FakeVLM require Python 3.11 and specific quantization libraries.
+Each model runs as an independent FastAPI server in its own `uv`-managed Python environment. This solves a real dependency conflict problem: InstructPix2Pix and SD Inpainting share `diffusers` but at potentially different version requirements; Grounded-SAM uses pure-Python HuggingFace transformers models (no compilation); Qwen2-VL and FakeVLM require Python 3.11 and specific quantization libraries.
 
 Every service exposes the same REST API shape:
 
@@ -230,7 +228,7 @@ Jobs run in background threads so the FastAPI server stays responsive for status
 |---|---|---|
 | InstructPix2Pix | 8001 | timbrooks/instruct-pix2pix |
 | Qwen2-VL Detector *(standalone)* | 8002 | Qwen/Qwen2-VL-2B-Instruct |
-| Grounded-SAM | 8003 | GroundingDINO + SAM 2 |
+| Grounded-SAM | 8003 | grounding-dino-base + sam-vit-large |
 | SD Inpainting | 8004 | sd2-community/stable-diffusion-2-inpainting |
 | FakeVLM *(Stage 2 — pipeline)* | 8005 | lingcco/fakeVLM |
 | Next.js frontend | 3000 | — |
@@ -299,7 +297,7 @@ The workspace directory is `.gitignore`d. Session files persist across aborts so
 │   │   ├── .python-version             ← 3.10
 │   │   ├── pyproject.toml
 │   │   ├── server.py                   ← FastAPI, port 8003
-│   │   ├── setup.py                    ← one-time: install from source + download checkpoints
+│   │   ├── setup.py                    ← optional: pre-download HuggingFace models
 │   │   └── start.sh
 │   │
 │   ├── inpainting/
@@ -399,17 +397,7 @@ Restart your terminal so `uv` is on `PATH`.
 
 Download and install CUDA Toolkit 12.1 from the NVIDIA website. Verify with `nvcc --version` after installation.
 
-**Step 4 — C++ Build Tools** *(required for Grounded-SAM)*
-
-Grounded-SAM compiles C++ extensions. Install Visual Studio Build Tools with the **"Desktop development with C++"** workload:
-
-```powershell
-winget install Microsoft.VisualStudio.2022.BuildTools
-```
-
-When the installer opens, select the **Desktop development with C++** workload. Alternatively, download the installer from the Visual C++ Build Tools page at microsoft.com.
-
-**Step 5 — Clone the repo, then switch to Git Bash**
+**Step 4 — Clone the repo, then switch to Git Bash**
 
 ```powershell
 git clone <repo-url>
@@ -459,17 +447,17 @@ cd services/inpainting        && uv sync && cd ../..
 cd services/fakeVLM           && uv sync && cd ../..
 ```
 
-### 3. Set up Grounded-SAM (one-time, requires internet)
-
-This script clones GroundingDINO and SAM 2 from GitHub, installs them into the service environment via `uv pip install -e`, and downloads the model checkpoints (~2 GB):
+### 3. Install Grounded-SAM dependencies
 
 ```bash
-cd services/grounded_sam
-uv sync
-uv run python setup.py
+cd services/grounded_sam && uv sync && cd ../..
 ```
 
-> **macOS / Linux prerequisite:** `Xcode Command Line Tools` (macOS) or `build-essential` + `python3-dev` (Linux) must be installed for the C++ extension compilation.
+Models (`grounding-dino-base`, `sam-vit-large`) are downloaded from HuggingFace automatically on first request. To pre-download them before running:
+
+```bash
+cd services/grounded_sam && uv run python setup.py && cd ../..
+```
 
 ### 4. Model weights (auto-downloaded on first run)
 
@@ -479,6 +467,8 @@ The remaining models are downloaded automatically from HuggingFace the first tim
 |---|---|---|
 | InstructPix2Pix | timbrooks/instruct-pix2pix | ~8 GB |
 | Artifact Detector | Qwen/Qwen2-VL-2B-Instruct | ~5 GB |
+| Grounded-SAM | IDEA-Research/grounding-dino-base | ~700 MB |
+| Grounded-SAM | facebook/sam-vit-large | ~600 MB |
 | SD Inpainting | sd2-community/stable-diffusion-2-inpainting | ~5 GB |
 | FakeVLM | lingcco/fakeVLM | ~7 GB |
 
@@ -674,7 +664,6 @@ POST /release
 
 - The `uv` `.python-version` files pin the Python interpreter per service. Running `uv sync` inside a service directory creates an isolated virtual environment automatically. Never run `pip install` directly; use `uv pip install` or add dependencies to `pyproject.toml`.
 - On NVIDIA machines, each service's `pyproject.toml` includes a `[tool.uv.sources]` block pointing to the PyTorch CUDA 12.1 index. If your CUDA version differs, change `cu121` to `cu118` or `cu124` in all `pyproject.toml` files and re-run `uv sync`.
-- The Grounded-SAM service requires compiled C++ extensions. If `uv run python setup.py` fails with a compiler error, install build tools first: `xcode-select --install` (macOS) or `sudo apt install build-essential python3-dev` (Ubuntu).
 - On first model load, HuggingFace weights are cached in `~/.cache/huggingface/`. Subsequent starts are fast.
 - The Next.js frontend assumes `pnpm dev` is run from within the `frontend/` directory, so that `process.cwd()` resolves `../workspace` correctly. The provided `frontend/start.sh` handles this automatically.
 - FakeVLM uses 4-bit NF4 quantization via `bitsandbytes`, which requires CUDA. On MPS or CPU the quantization config is skipped and the model loads in `float32`.
@@ -689,7 +678,7 @@ POST /release
 | Global edit | InstructPix2Pix | Instruction-following image edit, HuggingFace native |
 | Artifact detection (pipeline) | FakeVLM (lingcco/fakeVLM) | Trained for synthetic image detection + artifact explanation; 4-bit quantized |
 | Artifact detection (standalone) | Qwen2-VL-2B-Instruct | Lightweight, MPS-compatible, structured output; available for comparison |
-| Segmentation | Grounded-SAM 2 | Open-vocabulary text→mask, state-of-the-art quality |
+| Segmentation | Grounded-SAM (transformers) | Open-vocabulary text→mask, pure-Python HuggingFace implementation |
 | Inpainting | SD2 Inpainting | Text-guided fill, HuggingFace native, fast |
 | Service isolation | uv | Per-service Python version + dependency isolation |
 | Service runtime | FastAPI + uvicorn | Lightweight async HTTP, clean REST interface |
@@ -707,9 +696,8 @@ POST /release
 |---|---|---|
 | **InstructPix2Pix** | Brooks et al., 2022 | [arxiv.org/abs/2211.09800](https://arxiv.org/abs/2211.09800) · [HuggingFace](https://huggingface.co/timbrooks/instruct-pix2pix) |
 | **Qwen2-VL** | Qwen Team, Alibaba, 2024 | [arxiv.org/abs/2409.12191](https://arxiv.org/abs/2409.12191) · [HuggingFace](https://huggingface.co/Qwen/Qwen2-VL-2B-Instruct) |
-| **Grounding DINO** | Liu et al., 2023 | [arxiv.org/abs/2303.05499](https://arxiv.org/abs/2303.05499) · [GitHub](https://github.com/IDEA-Research/GroundingDINO) |
-| **SAM 2** (Segment Anything Model 2) | Ravi et al., Meta AI, 2024 | [arxiv.org/abs/2408.00714](https://arxiv.org/abs/2408.00714) · [GitHub](https://github.com/facebookresearch/sam2) |
-| **Grounded-SAM 2** (integration) | IDEA-Research | [GitHub](https://github.com/IDEA-Research/Grounded-SAM-2) |
+| **Grounding DINO** | Liu et al., 2023 | [arxiv.org/abs/2303.05499](https://arxiv.org/abs/2303.05499) · [HuggingFace](https://huggingface.co/IDEA-Research/grounding-dino-base) |
+| **SAM** (Segment Anything Model) | Kirillov et al., Meta AI, 2023 | [arxiv.org/abs/2304.02643](https://arxiv.org/abs/2304.02643) · [HuggingFace](https://huggingface.co/facebook/sam-vit-large) |
 | **Stable Diffusion 2 Inpainting** | Rombach et al. / Stability AI, 2022 | [arxiv.org/abs/2112.10752](https://arxiv.org/abs/2112.10752) · [HuggingFace](https://huggingface.co/sd2-community/stable-diffusion-2-inpainting) *(community mirror — original weights, Stability AI removed the official repo)* |
 | **FakeVLM** — "Spot the Fake" | Wen, Siwei et al., NeurIPS 2025 | Wen, S. et al. "Spot the fake: Large multimodal model-based synthetic image detection with artifact explanation." *Advances in Neural Information Processing Systems* 38 (2026): 58972–59005. · [HuggingFace](https://huggingface.co/lingcco/fakeVLM) |
 | **LLaVA** (FakeVLM base architecture) | Liu et al., 2023 | [arxiv.org/abs/2304.08485](https://arxiv.org/abs/2304.08485) |
@@ -728,11 +716,7 @@ POST /release
 | [FastAPI](https://fastapi.tiangolo.com/) | ≥ 0.111 | Async HTTP microservice framework |
 | [uvicorn](https://www.uvicorn.org/) | ≥ 0.29 | ASGI server for FastAPI |
 | [Pillow](https://python-pillow.org/) | ≥ 10.0 | Image I/O and format conversion |
-| [supervision](https://supervision.roboflow.com/) | ≥ 0.19 | Bounding box format utilities for Grounded-SAM |
 | [NumPy](https://numpy.org/) | ≥ 1.26 | Mask array operations |
-| [OpenCV (headless)](https://opencv.org/) | ≥ 4.9 | Image processing utilities in Grounded-SAM service |
-| [GroundingDINO](https://github.com/IDEA-Research/GroundingDINO) | source | Open-vocabulary object detection from text |
-| [SAM 2](https://github.com/facebookresearch/sam2) | source | Segment Anything Model 2 image predictor |
 
 ### Frontend Libraries
 
