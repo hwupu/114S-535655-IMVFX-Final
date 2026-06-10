@@ -17,6 +17,7 @@ start_service qwen25vl 8002
 start_service grounded_sam 8003
 start_service sd2 8004
 start_service fakeVLM 8005
+start_service PAL4VST 8006
 
 echo ""
 echo "All services started. Logs in ./logs/"

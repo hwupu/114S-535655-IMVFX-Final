@@ -4,6 +4,7 @@ export type PipelineStage =
   | "stage1"       // InstructPix2Pix
   | "stage2"       // Artifact detection
   | "stage3"       // Grounded-SAM mask generation
+  | "artifact_review"
   | "mask_review"  // Paused; user may edit mask
   | "stage4"       // SD Inpainting
   | "no_artifacts" // Complete — no artifacts found
@@ -28,7 +29,7 @@ export interface PipelineState {
 }
 
 export interface SSEMessage {
-  stage: number | "done" | "no_artifacts" | "mask_review" | "aborted" | "error";
+  stage: number | "done" | "no_artifacts" | "artifact_review" | "mask_review" | "aborted" | "error";
   status: "running" | "done" | "waiting" | "aborted" | "error";
   progress?: number;
   artifacts?: string[];

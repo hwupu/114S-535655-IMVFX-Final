@@ -148,7 +148,6 @@ def _run_job(job_id: str, req: InferRequest):
             output_ids[:, inputs.input_ids.shape[1]:],
             skip_special_tokens=True,
         )[0].strip()
-
         matches = BOX_RE.findall(generated)
         if matches:
             artifacts = [m[0].strip() for m in matches]

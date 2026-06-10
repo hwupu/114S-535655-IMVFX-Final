@@ -7,6 +7,16 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+import spacy
+from spacy.cli import download as spacy_download
+
+try:
+    nlp = spacy.load("en_core_web_sm")
+except OSError:
+    print("Downloading spaCy model 'en_core_web_sm'...")
+    spacy_download("en_core_web_sm")
+    nlp = spacy.load("en_core_web_sm")
+
 sys.path.append(str(Path(__file__).parent.parent / "shared"))
 from device import get_device, flush_memory
 
@@ -76,6 +86,38 @@ def _load_model():
     return _model, _processor
 
 
+def parse_fakevlm_output(text: str) -> str:
+
+    text = text[len("Does the image looks real/fake?"):]
+    print(text)
+    text_lower = text.lower().strip()
+    
+    if text_lower.startswith("this is a real image"):
+        return "NO_ARTIFACTS"
+        
+    if text_lower.startswith("this is a fake image."):
+        text = text[len("this is a fake image."):].strip()
+    elif text_lower.startswith("this is a fake image"):
+        text = text[len("this is a fake image"):].strip()
+
+    doc = nlp(text)
+    
+    ignore_words = {"image", "color", "saturation", "balance", "world", "noise", "texture", "features", "areas", "overall"}
+    
+    valid_chunks = []
+    for chunk in doc.noun_chunks:
+        chunk_text = chunk.text.strip()
+        if chunk.root.pos_ == "PRON":
+            continue
+        if not any(word in chunk_text.lower() for word in ignore_words):
+            valid_chunks.append(chunk_text)
+            
+    if not valid_chunks:
+        return "NO_ARTIFACTS"
+        
+    return " . ".join(valid_chunks) + " ."
+
+
 class InferRequest(BaseModel):
     image_path: str
     prompt: str = DEFAULT_PROMPT
@@ -86,7 +128,7 @@ class JobStatus(BaseModel):
     status: Literal["pending", "running", "done", "error"]
     progress: int = 0
     result: str | None = None
-    detail: str | None = None
+    detail: str | None = None  
 
 
 def _run_job(job_id: str, req: InferRequest):
@@ -117,13 +159,16 @@ def _run_job(job_id: str, req: InferRequest):
 
         # Strip prompt prefix; LLaVA typically echoes "USER: ... ASSISTANT: <answer>"
         if "ASSISTANT:" in full_text:
-            answer = full_text.split("ASSISTANT:", 1)[-1].strip()
+            raw_answer = full_text.split("ASSISTANT:", 1)[-1].strip()
         else:
-            answer = full_text.strip()
+            raw_answer = full_text.strip()
+
+        parsed_answer = parse_fakevlm_output(raw_answer)
 
         job["progress"] = 100
         job["status"] = "done"
-        job["result"] = answer
+        job["result"] = parsed_answer
+        job["detail"] = raw_answer 
     except Exception as exc:
         job["status"] = "error"
         job["detail"] = str(exc)

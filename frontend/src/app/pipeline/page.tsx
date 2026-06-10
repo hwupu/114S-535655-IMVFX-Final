@@ -175,6 +175,10 @@ export default function PipelinePage() {
         next.stage = "mask_review";
         if (msg.maskPath) next.maskUrl = imageApiUrl(msg.maskPath);
       }
+      if (msg.stage === "artifact_review") {
+        next.stage = "artifact_review";
+        if (msg.artifacts) next.artifacts = msg.artifacts;
+      }
       if (msg.stage === "no_artifacts") next.stage = "no_artifacts";
       if (msg.stage === "done") {
         next.stage = "done";
@@ -220,6 +224,13 @@ export default function PipelinePage() {
     }
     openSSE(state.sessionId, state.prompt, 4, state.artifacts);
   }
+
+ async function handleContinueArtifacts() {
+    if (!state.sessionId) return;
+    
+    openSSE(state.sessionId, state.prompt, 3, state.artifacts);
+  }
+
 
   // ── Reset ───────────────────────────────────────────────────────────────────
   const handleReset = useCallback(() => {
@@ -293,6 +304,7 @@ export default function PipelinePage() {
               disabled={isRunning || s === "mask_review"}
             />
             <div className="flex gap-3">
+              
               {s !== "mask_review" && (
                 <button
                   onClick={() => state.sessionId && openSSE(state.sessionId, state.prompt, 1)}
@@ -302,6 +314,7 @@ export default function PipelinePage() {
                   {isRunning ? "Running…" : "Start"}
                 </button>
               )}
+              
               {isRunning && (
                 <button
                   onClick={handleAbort}
@@ -329,7 +342,42 @@ export default function PipelinePage() {
             />
           </div>
         </div>
-
+        {/* 👉 rtifact review (after Stage 2 ) */}
+        {s === "artifact_review" && (
+          <div className="rounded-xl border border-amber-700/50 bg-amber-950/20 p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-amber-500">Review & Edit Detected Artifacts</h3>
+                <p className="text-xs text-amber-500/70">Modify the prompts before sending them to Grounded-SAM.</p>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={handleAbort}
+                  className="rounded-lg border border-amber-700/50 px-3 py-1.5 text-xs text-amber-500 hover:bg-amber-900/50 transition-colors"
+                >
+                  Abort
+                </button>
+                <button
+                  onClick={handleContinueArtifacts}
+                  className="rounded-lg bg-amber-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-amber-500 transition-colors"
+                >
+                  Continue to Masking →
+                </button>
+              </div>
+            </div>
+            
+            <textarea
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-900 p-3 text-sm text-zinc-200 focus:border-amber-500 focus:outline-none focus:ring-1 focus:ring-amber-500 min-h-[120px]"
+              value={state.artifacts.join("\n")}
+              onChange={(e) => {
+                
+                const updatedArtifacts = e.target.value.split("\n").filter((line) => line.trim() !== "");
+                patch({ artifacts: updatedArtifacts });
+              }}
+              placeholder="Enter artifacts here, one per line..."
+            />
+          </div>
+        )}
         {/* Mask editor (full-width, shown during mask_review) */}
         {s === "mask_review" && state.stage1OutputUrl && state.maskUrl && (
           <div className="rounded-xl border border-zinc-700 bg-zinc-900 p-4 space-y-4">

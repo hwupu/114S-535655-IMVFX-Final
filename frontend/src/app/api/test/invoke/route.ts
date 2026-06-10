@@ -8,6 +8,7 @@ const SERVICE_PORTS: Record<string, number> = {
   grounded_sam: 8003,
   sd2: 8004,
   fakevlm: 8005,
+  pal4vst: 8006,
 };
 
 export async function POST(req: NextRequest) {

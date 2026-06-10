@@ -11,6 +11,15 @@ const SERVICES = [
     color: "indigo",
   },
   {
+    slug: "pal4vst",
+    name: "PAL4VST",
+    port: 8006,
+    description: "Direct Perceptual Artifacts Localization",
+    inputs: "Image",
+    output: "Mask image",
+    color: "cyan", 
+  },
+  {
     slug: "fakevlm",
     name: "FakeVLM",
     port: 8005,
@@ -54,6 +63,7 @@ const colorMap: Record<string, string> = {
   amber: "border-amber-700/50 hover:border-amber-500",
   emerald: "border-emerald-700/50 hover:border-emerald-500",
   rose: "border-rose-700/50 hover:border-rose-500",
+  cyan: "border-cyan-700/50 hover:border-cyan-500",
 };
 
 const badgeMap: Record<string, string> = {
@@ -62,6 +72,7 @@ const badgeMap: Record<string, string> = {
   amber: "bg-amber-900/50 text-amber-300",
   emerald: "bg-emerald-900/50 text-emerald-300",
   rose: "bg-rose-900/50 text-rose-300",
+  cyan: "bg-cyan-900/50 text-cyan-300",
 };
 
 export default function HomePage() {
@@ -125,6 +136,31 @@ export default function HomePage() {
               </p>
             </div>
             <span className="ml-4 shrink-0 text-xl text-amber-600 transition-colors group-hover:text-amber-300">
+              →
+            </span>
+          </Link>
+
+          <Link
+            href="/pipeline-pal4vst"
+            className="group flex items-center justify-between rounded-xl border border-cyan-600/60 bg-cyan-950/40 p-6 transition-all hover:border-cyan-400 hover:bg-cyan-950/60"
+          >
+            <div className="space-y-1">
+              <div className="flex items-center gap-3">
+                <span className="text-lg font-semibold text-cyan-100 group-hover:text-white">
+                  PAL4VST Pipeline
+                </span>
+                <span className="rounded-full bg-cyan-800/60 px-2.5 py-0.5 text-xs text-cyan-300">
+                  Full pipeline
+                </span>
+              </div>
+              <p className="text-sm text-cyan-300/70">
+                InstructPix2Pix → PAL4VST → SD2
+              </p>
+              <p className="text-xs text-zinc-500">
+                Uses PAL4VST for artifact localization and mask generation
+              </p>
+            </div>
+            <span className="ml-4 shrink-0 text-xl text-cyan-600 transition-colors group-hover:text-cyan-300">
               →
             </span>
           </Link>
