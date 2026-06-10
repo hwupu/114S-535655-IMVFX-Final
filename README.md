@@ -445,6 +445,8 @@ cd services/qwen25vl          && uv sync && cd ../..
 cd services/sd2               && uv sync && cd ../..
 cd services/fakeVLM           && uv sync && cd ../..
 cd services/grounded_sam      && uv sync && cd ../..
+cd services/PAL4VST           && uv sync && cd ../..
+
 ```
 
 ### 3. Model weights (auto-downloaded on first run)
@@ -459,7 +461,6 @@ The remaining models are downloaded automatically from HuggingFace the first tim
 | Grounded-SAM | facebook/sam-vit-large | ~600 MB |
 | SD Inpainting | sd2-community/stable-diffusion-2-inpainting | ~5 GB |
 | FakeVLM | lingcco/fakeVLM | ~7 GB |
-
 Weights are cached in `~/.cache/huggingface/hub/`. To pre-download without running the pipeline:
 
 ```bash
@@ -470,6 +471,10 @@ huggingface-cli download facebook/sam-vit-large
 huggingface-cli download sd2-community/stable-diffusion-2-inpainting
 huggingface-cli download lingcco/fakeVLM
 ```
+
+For PAL4VST, download from their github page https://github.com/owenzlz/PAL4VST/tree/main (Model name is unified, Torchscript version)
+
+And put the model under services/PAL4VST.
 
 ---
 
@@ -511,6 +516,7 @@ curl http://localhost:8002/health   # Artifact Detector
 curl http://localhost:8003/health   # Grounded-SAM
 curl http://localhost:8004/health   # SD Inpainting
 curl http://localhost:8005/health   # FakeVLM (Stage 2 — pipeline)
+curl http://localhost:8006/health   # PAL4VST
 ```
 
 ---
@@ -550,7 +556,7 @@ Each model can be tested independently from the landing page at [http://localhos
 | `/test/qwen25vl` | Upload image → see Qwen2.5-VL artifact list with bounding boxes |
 | `/test/grounded-sam` | Upload image + type artifact descriptions → see segmentation mask |
 | `/test/sd2` | Upload image + mask + type prompt → see inpainted result |
-
+| `/test/pal4vst` | Upload image → see artifact mask |
 These pages are useful for verifying that each service is working correctly before running the full pipeline.
 
 ---
