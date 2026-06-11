@@ -16,6 +16,7 @@ export interface PipelineState {
   stage: PipelineStage;
   sessionId: string | null;
   prompt: string;
+  sd2Prompt: string;
   originalImageUrl: string | null;   // uploaded file, object URL
   stage1OutputUrl: string | null;    // /api/images/:session/stage1_output.png
   artifacts: string[];               // VLM descriptions (parsed)

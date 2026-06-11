@@ -13,6 +13,7 @@ const INITIAL: PipelineState = {
   stage: "idle",
   sessionId: null,
   prompt: "",
+  sd2Prompt: "",
   originalImageUrl: null,
   stage1OutputUrl: null,
   artifacts: [],
@@ -109,13 +110,13 @@ export default function PipelinePal4VSTPage() {
     patch({ sessionId, stage: "idle" });
   }
 
-  function openSSE(sessionId: string, prompt: string, fromStage: number) {
+  function openSSE(sessionId: string, prompt: string, fromStage: number, sd2Prompt?: string) {
     readerRef.current?.cancel();
 
     fetch("/api/pipeline-pal4vst", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId, prompt, fromStage }),
+      body: JSON.stringify({ sessionId, prompt, sd2Prompt, fromStage }),
     }).then(async (res) => {
       if (!res.body) return;
       const reader = res.body.getReader();
@@ -203,7 +204,7 @@ export default function PipelinePal4VSTPage() {
       form.append("sessionId", state.sessionId);
       await fetch("/api/upload/mask", { method: "POST", body: form });
     }
-    openSSE(state.sessionId, state.prompt, 3);
+    openSSE(state.sessionId, state.prompt, 3, state.sd2Prompt);
   }
 
   const handleReset = useCallback(() => {
@@ -274,12 +275,24 @@ export default function PipelinePal4VSTPage() {
             <PromptPanel
               value={state.prompt}
               onChange={(v) => patch({ prompt: v })}
-              disabled={isRunning || s === "mask_review"}
+              disabled={isRunning}
             />
+            <div className="space-y-2 rounded-xl border border-zinc-800 bg-zinc-900 p-3">
+              <label className="block text-sm font-medium text-zinc-300">SD2 inpainting prompt</label>
+              <textarea
+                value={state.sd2Prompt}
+                onChange={(e) => patch({ sd2Prompt: e.target.value })}
+                disabled={isRunning}
+                placeholder="Describe how the repaired area should look (used only for the final SD2 pass)"
+                rows={3}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-cyan-500 focus:outline-none disabled:opacity-50"
+              />
+              <p className="text-xs text-zinc-500">This prompt is sent to SD2 for the final artifact repair stage.</p>
+            </div>
             <div className="flex gap-3">
               {s !== "mask_review" && (
                 <button
-                  onClick={() => state.sessionId && openSSE(state.sessionId, state.prompt, 1)}
+                  onClick={() => state.sessionId && openSSE(state.sessionId, state.prompt, 1, state.sd2Prompt)}
                   disabled={!canStart}
                   className="flex-1 rounded-lg bg-cyan-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-40"
                 >

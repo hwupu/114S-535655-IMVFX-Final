@@ -13,6 +13,7 @@ const INITIAL: PipelineState = {
   stage: "idle",
   sessionId: null,
   prompt: "",
+  sd2Prompt: "",
   originalImageUrl: null,
   stage1OutputUrl: null,
   artifacts: [],

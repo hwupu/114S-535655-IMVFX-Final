@@ -1,8 +1,11 @@
+import os
 import sys
 import uuid
 import threading
 from pathlib import Path
 from typing import Literal
+
+os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":16:8")
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -12,8 +15,31 @@ from device import get_device, flush_memory
 
 app = FastAPI(title="SD Inpainting Service")
 
+DEFAULT_SEED = 42
+
 _jobs: dict[str, dict] = {}
 _pipeline = None
+
+
+def _set_deterministic(seed: int = DEFAULT_SEED) -> int:
+    import random
+
+    import numpy as np
+    import torch
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    try:
+        torch.use_deterministic_algorithms(True)
+    except Exception:
+        pass
+    return seed
 
 
 def _unload() -> None:
@@ -61,30 +87,74 @@ def _run_job(job_id: str, req: InferRequest):
     job["status"] = "running"
     job["progress"] = 5
     try:
+        import torch
+
+        seed = _set_deterministic(DEFAULT_SEED)
         pipe = _load_pipeline()
         job["progress"] = 20
 
         image = Image.open(req.image_path).convert("RGB")
         mask = Image.open(req.mask_path).convert("L")
 
-        # SD inpainting expects 512×512; resize and restore original size
+        # # SD inpainting expects 512×512; resize and restore original size
         orig_size = image.size
-        image_r = image.resize((512, 512))
-        mask_r = mask.resize((512, 512))
-        job["progress"] = 35
+        # image_r = image.resize((512, 512))
+        # mask_r = mask.resize((512, 512))
+        # job["progress"] = 35
+
+        device = get_device()
+        generator = torch.Generator(device=device).manual_seed(seed)
+
+        # result = pipe(
+        #     prompt=req.prompt,
+        #     image=image_r,
+        #     mask_image=mask_r,
+        #     num_inference_steps=50,
+        #     guidance_scale=7.5,
+        #     generator=generator,
+        # ).images[0]
+        # job["progress"] = 90
+
+        # result = result.resize(orig_size)
+        # out_path = str(Path(req.image_path).parent / "stage4_result.png")
+        # result.save(out_path)
+
+
+
+        # mask = mask.filter(ImageFilter.GaussianBlur(radius=3))
+
+        width, height = orig_size
+        aspect_ratio = width / height
+        if width < height:
+            new_width = 512
+            new_height = int((512 / aspect_ratio) // 8 * 8)
+        else:
+            new_height = 512
+            new_width = int((512 * aspect_ratio) // 8 * 8)
+
+        image_r = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        mask_r = mask.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+        # better_prompt = "beautiful emerald green cat eyes, sharp focus, highly detailed, photorealistic"
+        neg_prompt = "glowing, low resolution, blurry, deformed, cross-eyed, unnatural, poorly drawn"
 
         result = pipe(
             prompt=req.prompt,
+            negative_prompt=neg_prompt,
             image=image_r,
             mask_image=mask_r,
             num_inference_steps=50,
             guidance_scale=7.5,
+            generator=generator,
         ).images[0]
-        job["progress"] = 90
 
-        result = result.resize(orig_size)
+        result = result.resize(orig_size, Image.Resampling.LANCZOS)
         out_path = str(Path(req.image_path).parent / "stage4_result.png")
         result.save(out_path)
+
+
+
+
         job["progress"] = 100
         job["status"] = "done"
         job["result_path"] = out_path

@@ -7,6 +7,7 @@ import { WORKSPACE } from "@/lib/paths";
 interface StartRequest {
   sessionId: string;
   prompt: string;
+  sd2Prompt?: string;
   fromStage?: number;
   threshold?: number;
 }
@@ -15,7 +16,7 @@ type Service = Parameters<typeof submitJob>[0];
 
 export async function POST(req: NextRequest) {
   const body: StartRequest = await req.json();
-  const { sessionId, prompt, fromStage = 1, threshold = 0.5 } = body;
+  const { sessionId, prompt, sd2Prompt, fromStage = 1, threshold = 0.5 } = body;
 
   const encoder = new TextEncoder();
 
@@ -119,9 +120,12 @@ export async function POST(req: NextRequest) {
         }
 
         if (fromStage <= 3) {
-          const inpaintPrompt = prompt
-            ? `Naturally repair the image according to: ${prompt}`
-            : "Naturally repair any visual defects in the marked region";
+          const explicitSd2Prompt = sd2Prompt?.trim();
+          const inpaintPrompt = explicitSd2Prompt
+            ? explicitSd2Prompt
+            : prompt?.trim()
+              ? `Naturally repair the image according to: ${prompt}`
+              : "Naturally repair any visual defects in the marked region";
 
           const { ok } = await runStage(3, "sd2", {
             image_path: path.join(sessionDir, "stage1_output.png"),
